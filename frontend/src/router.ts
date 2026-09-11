@@ -38,4 +38,10 @@ router.beforeEach(async (to) => {
   return true;
 });
 
+router.afterEach(() => {
+  window.requestAnimationFrame(() => {
+    document.querySelector<HTMLElement>('#main-content, #workspace-content')?.focus();
+  });
+});
+
 export default router;

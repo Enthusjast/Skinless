@@ -48,7 +48,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
       </div>
       <nav class="workspace-nav" aria-label="工作台菜单">
         <p class="workspace-nav-label">用户中心</p>
-        <RouterLink class="workspace-nav-link" to="/dashboard" :class="{ active: route.path === '/dashboard' }" @click="sidebarOpen = false">
+        <RouterLink class="workspace-nav-link" to="/dashboard" :class="{ active: route.path === '/dashboard' && !route.hash }" @click="sidebarOpen = false">
           <LayoutDashboard :size="18" aria-hidden="true" /><span>仪表盘</span>
         </RouterLink>
         <RouterLink class="workspace-nav-link" to="/dashboard#appearance" :class="{ active: route.hash === '#appearance' }" @click="sidebarOpen = false">
