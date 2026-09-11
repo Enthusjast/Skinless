@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { LayoutDashboard, LogOut, Menu, Palette, Shield, UserRound, X } from 'lucide-vue-next';
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
+import PageHeader from '../components/common/PageHeader.vue';
 import ThemeToggle from '../components/ThemeToggle.vue';
 import { useAuthStore } from '../stores/auth';
 
@@ -91,7 +92,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
         </div>
       </header>
       <main id="workspace-content" class="workspace-content" tabindex="-1">
-        <header class="workspace-page-header"><div><p class="eyebrow">{{ pageEyebrow }}</p><h1>{{ pageTitle }}</h1></div><p v-if="route.meta.description" class="workspace-page-description">{{ route.meta.description }}</p></header>
+        <PageHeader :eyebrow="pageEyebrow" :title="pageTitle" :description="String(route.meta.description ?? '')" />
         <RouterView />
       </main>
     </div>
