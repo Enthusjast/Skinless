@@ -31,7 +31,9 @@ app.notFound((c) => c.json({ error: 'NotFound', errorMessage: 'Resource not foun
 const worker: ExportedHandler<Bindings> = {
   fetch: app.fetch,
   scheduled: async (_controller, env) => {
-    await env.DB.prepare('DELETE FROM tokens WHERE expires_at < ?').bind(Date.now()).run();
+    const now = Date.now();
+    await env.DB.prepare('DELETE FROM tokens WHERE expires_at < ?').bind(now).run();
+    await env.DB.prepare('DELETE FROM server_sessions WHERE expires_at < ?').bind(now).run();
   },
 };
 

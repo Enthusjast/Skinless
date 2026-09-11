@@ -150,8 +150,8 @@ routes.post('/authserver/refresh', async (c) => {
     password: result.context.user_password,
     salt: result.context.user_salt,
     role: result.context.user_role,
-    created_at: 0,
-    updated_at: 0,
+    created_at: result.context.user_created_at,
+    updated_at: result.context.user_updated_at,
   };
   return c.json(tokenResponse(token, profile, user, body.requestUser === true));
 });

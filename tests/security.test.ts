@@ -15,10 +15,11 @@ describe('security and operational safeguards', () => {
 
   it('runs the scheduled expired-token cleanup query', async () => {
     let deletedBefore = 0;
+    const cleanupQueries: string[] = [];
     const env = {
       DB: {
         prepare(sql: string) {
-          expect(sql).toContain('DELETE FROM tokens');
+          cleanupQueries.push(sql);
           return {
             bind(value: number) {
               deletedBefore = value;
@@ -32,5 +33,9 @@ describe('security and operational safeguards', () => {
 
     await worker.scheduled?.({} as ScheduledController, env as never, {} as ExecutionContext);
     expect(deletedBefore).toBeGreaterThan(0);
+    expect(cleanupQueries).toEqual([
+      'DELETE FROM tokens WHERE expires_at < ?',
+      'DELETE FROM server_sessions WHERE expires_at < ?',
+    ]);
   });
 });

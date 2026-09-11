@@ -57,6 +57,7 @@ pnpm exec wrangler deploy --dry-run
 | 纹理 | `/api/yggdrasil/textures/:hash` | `/textures/:hash` |
 
 `hasJoined` 响应会缓存 60 秒；纹理使用内容 SHA-256 作为 R2 key，并设置长期 immutable 缓存。
+服务端进服时先调用 `sessionserver/session/minecraft/join`，Worker 校验 access token 和 profile 后建立五分钟 session，`hasJoined` 只对已建立的 session 返回 profile。
 
 ## Cloudflare 部署
 

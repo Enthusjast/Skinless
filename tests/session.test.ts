@@ -10,6 +10,9 @@ class ProfileD1 {
     return {
       bind: (...values: unknown[]) => ({
         first: async <T>() => {
+          if (normalized.includes('FROM server_sessions')) {
+            return (values[0] === 'server-id' && values[1] === this.profile.name ? { ...this.profile } : null) as T | null;
+          }
           if (normalized.includes('WHERE name = ?')) return (this.profile.name === values[0] ? { ...this.profile } : null) as T | null;
           if (normalized.includes('WHERE id = ?')) return (this.profile.id === values[0] ? { ...this.profile } : null) as T | null;
           return null as T | null;

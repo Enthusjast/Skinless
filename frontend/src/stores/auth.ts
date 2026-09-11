@@ -97,9 +97,9 @@ export const useAuthStore = defineStore('auth', {
       await changePassword(this.token, currentPassword, newPassword);
       this.clearSession();
     },
-    async upload(asset: 'skin' | 'cape', file: Blob, model: 'classic' | 'slim') {
+    async upload(asset: 'skin' | 'cape', file: Blob, model: 'classic' | 'slim', clientHash?: string) {
       if (!this.token || !this.user) throw new Error('Not authenticated');
-      const result = await uploadAsset(this.token, asset, file, model);
+      const result = await uploadAsset(this.token, asset, file, model, clientHash);
       this.user.profile = result.profile;
       return result;
     },

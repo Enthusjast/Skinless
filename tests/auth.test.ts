@@ -73,6 +73,8 @@ class FakeD1 {
         user_password: user.password,
         user_salt: user.salt,
         user_role: user.role,
+        user_created_at: user.created_at,
+        user_updated_at: user.updated_at,
         profile_name: profile.name,
         skin_hash: profile.skin_hash,
         cape_hash: profile.cape_hash,
@@ -184,11 +186,12 @@ describe('Yggdrasil authentication API', () => {
     const refresh = await app.request('/api/yggdrasil/authserver/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessToken: authBody.accessToken, clientToken: 'client-1' }),
+      body: JSON.stringify({ accessToken: authBody.accessToken, clientToken: 'client-1', requestUser: true }),
     }, env);
     expect(refresh.status).toBe(200);
-    const refreshBody = await refresh.json() as { accessToken: string };
+    const refreshBody = await refresh.json() as { accessToken: string; user: { id: string } };
     expect(refreshBody.accessToken).not.toBe(authBody.accessToken);
+    expect(refreshBody.user.id).toBe(user.id);
     expect(db.tokens.has(authBody.accessToken)).toBe(false);
 
     const invalidate = await app.request('/api/yggdrasil/authserver/invalidate', {

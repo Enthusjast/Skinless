@@ -29,7 +29,7 @@ function partStyle(x: number, y: number, width: number, height: number) {
       <div class="skin-row skin-body-row">
         <div class="texture-part skin-limb" :style="partStyle(44, 20, 4, 12)" />
         <div class="texture-part skin-body" :style="partStyle(20, 20, 8, 12)" />
-        <div class="texture-part skin-limb" :style="partStyle(model === 'slim' ? 36 : 44, 20, 4, 12)" />
+        <div class="texture-part skin-limb" :style="partStyle(36, 52, 4, 12)" />
       </div>
       <div class="skin-row skin-legs-row">
         <div class="texture-part skin-leg" :style="partStyle(4, 20, 4, 12)" />

@@ -20,6 +20,14 @@ export interface TokenContextRow extends TokenRecord {
   skin_model: SkinModel;
 }
 
+export interface ServerSessionRecord {
+  server_id: string;
+  profile_id: string;
+  user_id: string;
+  created_at: number;
+  expires_at: number;
+}
+
 export async function findUserByEmail(db: D1Database, email: string): Promise<UserRecord | null> {
   return db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first<UserRecord>();
 }
@@ -125,6 +133,38 @@ export async function deleteToken(db: D1Database, accessToken: string): Promise<
 
 export async function deleteUserTokens(db: D1Database, userId: string): Promise<void> {
   await db.prepare('DELETE FROM tokens WHERE user_id = ?').bind(userId).run();
+}
+
+export async function createServerSession(db: D1Database, session: ServerSessionRecord): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (server_id, profile_id) DO UPDATE SET
+         user_id = excluded.user_id,
+         created_at = excluded.created_at,
+         expires_at = excluded.expires_at`,
+    )
+    .bind(session.server_id, session.profile_id, session.user_id, session.created_at, session.expires_at)
+    .run();
+}
+
+export async function findJoinedProfile(
+  db: D1Database,
+  serverId: string,
+  profileName: string,
+  now = Date.now(),
+): Promise<ProfileRecord | null> {
+  return db
+    .prepare(
+      `SELECT p.*
+       FROM server_sessions s
+       INNER JOIN profiles p ON p.id = s.profile_id
+       WHERE s.server_id = ? AND p.name = ? AND s.expires_at > ?
+       LIMIT 1`,
+    )
+    .bind(serverId, profileName, now)
+    .first<ProfileRecord>();
 }
 
 export async function updatePassword(

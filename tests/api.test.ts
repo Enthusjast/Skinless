@@ -37,6 +37,7 @@ class MemoryD1 {
   public users = new Map<string, UserRecord>();
   public profiles = new Map<string, ProfileRecord>();
   public tokens = new Map<string, TokenRecord>();
+  public sessions = new Map<string, { serverId: string; profileId: string; userId: string; expiresAt: number }>();
 
   prepare(sql: string): Statement {
     return new Statement(this, sql.replace(/\s+/g, ' ').trim());
@@ -67,6 +68,11 @@ class MemoryD1 {
     if (sql.startsWith('SELECT COUNT(*)')) {
       const hash = values[0];
       return { count: [...this.profiles.values()].filter((profile) => profile.skin_hash === hash || profile.cape_hash === hash).length };
+    }
+    if (sql.includes('FROM server_sessions')) {
+      const session = this.sessions.get(String(values[0]));
+      const profile = session ? this.profiles.get(session.profileId) : null;
+      return session && profile && profile.name === values[1] && session.expiresAt > Number(values[2]) ? { ...profile } : null;
     }
     if (sql.includes('FROM tokens t INNER JOIN users')) {
       const token = this.tokens.get(String(values[0]));
@@ -116,6 +122,9 @@ class MemoryD1 {
     } else if (sql.startsWith('INSERT INTO tokens')) {
       const [access_token, client_token, user_id, profile_id, created_at, expires_at] = values;
       this.tokens.set(String(access_token), { access_token: String(access_token), client_token: String(client_token), user_id: String(user_id), profile_id: String(profile_id), created_at: Number(created_at), expires_at: Number(expires_at) });
+    } else if (sql.startsWith('INSERT INTO server_sessions')) {
+      const [serverId, profileId, userId, _createdAt, expiresAt] = values;
+      this.sessions.set(String(serverId), { serverId: String(serverId), profileId: String(profileId), userId: String(userId), expiresAt: Number(expiresAt) });
     } else if (sql.startsWith('UPDATE users SET password')) {
       const [password, salt, updatedAt, userId] = values;
       const user = this.users.get(String(userId));
@@ -184,6 +193,13 @@ describe('management API', () => {
 
   it('registers a user, uploads a skin, and removes its unreferenced R2 object', async () => {
     const { db, bucket, env, token } = await registeredClient();
+    const mismatchForm = new FormData();
+    mismatchForm.set('file', new File([pngHeader(64, 64).buffer as ArrayBuffer], 'skin.png', { type: 'image/png' }));
+    mismatchForm.set('sha256', '0'.repeat(64));
+    const mismatch = await app.request('/api/user/skin', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: mismatchForm }, env);
+    expect(mismatch.status).toBe(400);
+    expect(bucket.files.size).toBe(0);
+
     const form = new FormData();
     form.set('file', new File([pngHeader(64, 64).buffer as ArrayBuffer], 'skin.png', { type: 'image/png' }));
     form.set('skin_model', 'slim');
@@ -192,6 +208,12 @@ describe('management API', () => {
     expect(upload.status).toBe(201);
     expect(bucket.files.size).toBe(1);
     expect([...db.profiles.values()][0].skin_model).toBe('slim');
+
+    const joinedProfile = [...db.profiles.values()][0];
+    const join = await app.request('/sessionserver/session/minecraft/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: token, selectedProfile: { id: joinedProfile.id }, serverId: 'smoke-server' }) }, env);
+    expect(join.status).toBe(204);
+    const hasJoined = await app.request('/sessionserver/session/minecraft/hasJoined?username=PlayerOne&serverId=smoke-server', {}, env);
+    expect(hasJoined.status).toBe(200);
 
     const profile = await app.request('/api/user/profile', { headers: { Authorization: `Bearer ${token}` } }, env);
     expect(profile.status).toBe(200);

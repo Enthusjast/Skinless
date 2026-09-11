@@ -95,10 +95,11 @@ export function changePassword(token: string, currentPassword: string, newPasswo
   }, token);
 }
 
-export function uploadAsset(token: string, asset: 'skin' | 'cape', file: Blob, model: 'classic' | 'slim'): Promise<{ hash: string; profile: ApiProfile }> {
+export function uploadAsset(token: string, asset: 'skin' | 'cape', file: Blob, model: 'classic' | 'slim', clientHash?: string): Promise<{ hash: string; profile: ApiProfile }> {
   const form = new FormData();
   form.set('file', file, `${asset}.png`);
   if (asset === 'skin') form.set('skin_model', model);
+  if (clientHash) form.set('sha256', clientHash);
   return request<{ hash: string; profile: ApiProfile }>(`/api/user/${asset}`, { method: 'POST', body: form }, token);
 }
 

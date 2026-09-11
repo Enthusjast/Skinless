@@ -58,6 +58,11 @@ function resizeTexture(file: File): Promise<Blob> {
   });
 }
 
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function upload() {
   if (!selectedFile.value) return;
   busy.value = true;
@@ -65,7 +70,8 @@ async function upload() {
   success.value = '';
   try {
     const normalized = await resizeTexture(selectedFile.value);
-    const result = await auth.upload(props.asset, normalized, props.model);
+    const clientHash = await sha256Hex(await normalized.arrayBuffer());
+    const result = await auth.upload(props.asset, normalized, props.model, clientHash);
     emit('updated', result.hash);
     selectedFile.value = null;
     if (fileInput.value) fileInput.value.value = '';

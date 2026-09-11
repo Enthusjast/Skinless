@@ -102,6 +102,13 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   const model = selectedModel ?? profile.skin_model;
 
   const hash = await sha256Hex(bytes);
+  const clientHash = asString(body.sha256);
+  if (clientHash && !/^[0-9a-f]{64}$/i.test(clientHash)) {
+    return jsonError(c, 400, 'sha256 must be a 64-character hexadecimal digest.');
+  }
+  if (clientHash && clientHash.toLowerCase() !== hash) {
+    return jsonError(c, 400, 'The uploaded file hash does not match its contents.');
+  }
   const key = `${hash}.png`;
   if (!await c.env.BUCKET.head(key)) {
     await c.env.BUCKET.put(key, bytes, {
