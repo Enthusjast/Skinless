@@ -27,6 +27,12 @@ importers:
 
   frontend:
     dependencies:
+      '@fontsource/press-start-2p':
+        specifier: ^5.2.5
+        version: 5.3.0
+      lucide-vue-next:
+        specifier: ^0.468.0
+        version: 0.468.0(vue@3.5.42(typescript@5.9.3))
       pinia:
         specifier: ^2.2.4
         version: 2.3.1(typescript@5.9.3)(vue@3.5.42(typescript@5.9.3))
@@ -405,6 +411,9 @@ packages:
   '@fastify/busboy@2.1.1':
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
+
+  '@fontsource/press-start-2p@5.3.0':
+    resolution: {integrity: sha512-gxWFxdeDglPhEYSwEeooomcaFK8kSQYLQwVxfnOJeYRj2sPEHXjpVtFgEaYfqzOjuAJGrIcJOipu2KY5YkbyuQ==}
 
   '@img/sharp-darwin-arm64@0.33.5':
     resolution: {integrity: sha512-UT4p+iz/2H4twwAoLCqfA9UH5pI6DggwKEGuaPy7nCVQ8ZsiY5PIcrRvD1DzuY3qYL07NtIQcWnBSY/heikIFQ==}
@@ -920,6 +929,11 @@ packages:
   loupe@3.2.1:
     resolution: {integrity: sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ==}
 
+  lucide-vue-next@0.468.0:
+    resolution: {integrity: sha512-quV/6T8YB1XK0VOEnebg3Byd8Rsan5/m95cvjnuHV4vcS3qEnLAybkrSh0hk3ppavx+V7R1PjNW+mGDvcBdz4A==}
+    peerDependencies:
+      vue: '>=3.0.1'
+
   magic-string@0.25.9:
     resolution: {integrity: sha512-RmF0AsMzgt25qzqqLc1+MbHmhdx0ojF2Fvs4XnOqz2ZOBXzzkEwc/dJQZCYHAn7v1jbVOjAZfK8msRn4BxO4VQ==}
 
@@ -1414,6 +1428,8 @@ snapshots:
 
   '@fastify/busboy@2.1.1': {}
 
+  '@fontsource/press-start-2p@5.3.0': {}
+
   '@img/sharp-darwin-arm64@0.33.5':
     optionalDependencies:
       '@img/sharp-libvips-darwin-arm64': 1.0.4
@@ -1869,6 +1885,10 @@ snapshots:
     optional: true
 
   loupe@3.2.1: {}
+
+  lucide-vue-next@0.468.0(vue@3.5.42(typescript@5.9.3)):
+    dependencies:
+      vue: 3.5.42(typescript@5.9.3)
 
   magic-string@0.25.9:
     dependencies:
