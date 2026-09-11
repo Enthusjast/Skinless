@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { AppEnv } from './types';
 import authRoutes from './routes/auth';
+import sessionRoutes from './routes/session';
+import textureRoutes from './routes/textures';
 import { corsMiddleware } from './middleware/cors';
 import { metadata } from './utils/config';
 
@@ -12,6 +14,10 @@ app.get('/api/yggdrasil', metadata);
 app.get('/api/yggdrasil/', metadata);
 app.route('/', authRoutes);
 app.route('/api/yggdrasil', authRoutes);
+app.route('/', sessionRoutes);
+app.route('/api/yggdrasil', sessionRoutes);
+app.route('/', textureRoutes);
+app.route('/api/yggdrasil', textureRoutes);
 
 app.notFound((c) => c.json({ error: 'NotFound', errorMessage: 'Resource not found.' }, 404));
 
