@@ -129,6 +129,8 @@ h1, h2, h3 { color: var(--text); }
 .public-mobile-menu a:hover, .public-mobile-menu button:hover { color: var(--text); background: var(--surface-hover); }
 .public-main { width: min(1180px, calc(100% - 48px)); min-height: calc(100dvh - 138px); margin: 0 auto; }
 .public-footer { display: flex; width: min(1180px, calc(100% - 48px)); justify-content: space-between; gap: 24px; margin: 0 auto; padding: 24px 0 32px; color: var(--muted-strong); border-top: 1px solid var(--border); font-size: .78rem; }
+.public-footer-link { display: inline-flex; min-height: 32px; align-items: center; gap: 7px; color: var(--muted); transition: color var(--motion); }
+.public-footer-link:hover { color: var(--accent); }
 
 /* Home */
 .hero { position: relative; min-height: 550px; display: grid; align-content: center; max-width: 780px; padding: 90px 0 80px; }

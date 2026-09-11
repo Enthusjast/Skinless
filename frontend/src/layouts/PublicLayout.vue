@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LogOut, Menu, X } from 'lucide-vue-next';
+import { Github, LogOut, Menu, X } from 'lucide-vue-next';
 import { ref } from 'vue';
 import { RouterLink, RouterView, useRouter } from 'vue-router';
 import ThemeToggle from '../components/ThemeToggle.vue';
@@ -54,7 +54,7 @@ async function logout() {
     </main>
     <footer class="public-footer">
       <span>Skinless · Minecraft 外置登录与皮肤管理</span>
-      <span>账号、皮肤与披风管理</span>
+      <a class="public-footer-link" href="https://github.com/Enthusjast/Skinless" target="_blank" rel="noreferrer noopener"><Github :size="15" aria-hidden="true" />GitHub 项目</a>
     </footer>
   </div>
 </template>
