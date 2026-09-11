@@ -1,17 +1,17 @@
 import { Hono } from 'hono';
 import type { AppEnv } from './types';
+import authRoutes from './routes/auth';
+import { corsMiddleware } from './middleware/cors';
+import { metadata } from './utils/config';
 
 export const app = new Hono<AppEnv>();
 
-app.get('/', (c) =>
-  c.json({
-    meta: {
-      serverName: c.env.SERVER_NAME ?? 'Skinless',
-      implementationName: 'cf-yggdrasil',
-      implementationVersion: c.env.IMPLEMENTATION_VERSION ?? '0.1.0',
-    },
-  }),
-);
+app.use('*', corsMiddleware);
+app.get('/', metadata);
+app.get('/api/yggdrasil', metadata);
+app.get('/api/yggdrasil/', metadata);
+app.route('/', authRoutes);
+app.route('/api/yggdrasil', authRoutes);
 
 app.notFound((c) => c.json({ error: 'NotFound', errorMessage: 'Resource not found.' }, 404));
 
