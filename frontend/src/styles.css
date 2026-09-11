@@ -170,7 +170,7 @@ h1, h2, h3 { color: var(--text); }
 .field { display: grid; gap: 7px; margin-top: 18px; }
 .field label { color: var(--text-soft); font-size: .83rem; font-weight: 650; }
 .field small { color: var(--muted); font-size: .72rem; line-height: 1.4; }
-.field input, .field select { width: 100%; min-height: 46px; padding: 0 13px; color: var(--text); background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none; transition: border-color var(--motion), box-shadow var(--motion), background var(--motion); }
+.field input, .field select { width: 100%; min-height: 48px; padding: 0 13px; color: var(--text); background: var(--bg-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none; transition: border-color var(--motion), box-shadow var(--motion), background var(--motion); }
 .field input::placeholder { color: var(--muted-strong); }
 .field input:hover, .field select:hover { border-color: var(--border-strong); }
 .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--focus); }
@@ -254,6 +254,7 @@ h1, h2, h3 { color: var(--text); }
 .dropzone:hover, .dropzone.dragging { background: color-mix(in srgb, var(--accent) 9%, var(--bg-soft)); border-color: var(--accent); }
 .dropzone:disabled { cursor: wait; opacity: .6; }
 .dropzone-icon { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: var(--radius-sm); }
+.upload-thumb { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; border-radius: 6px; }
 .dropzone.has-file .dropzone-icon { color: var(--success); }
 .dropzone > span:last-child { display: grid; gap: 3px; min-width: 0; }
 .dropzone strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

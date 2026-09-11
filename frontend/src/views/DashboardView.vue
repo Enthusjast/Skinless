@@ -3,6 +3,7 @@ import { Copy, KeyRound, ShieldCheck } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ApiError } from '../api';
+import UiCard from '../components/common/UiCard.vue';
 import SkinPreview from '../components/SkinPreview.vue';
 import SkinUploader from '../components/SkinUploader.vue';
 import { useAuthStore } from '../stores/auth';
@@ -47,17 +48,17 @@ async function changePassword() {
   </section>
   <div class="dashboard-grid">
     <div class="dashboard-main">
-      <section id="appearance" class="panel model-panel">
+      <UiCard as="section" id="appearance" class="panel model-panel">
         <div class="workspace-section-heading"><div><p class="eyebrow">01 / APPEARANCE</p><h2>你的角色</h2></div><span class="section-caption">选择模型后上传对应纹理</span></div>
         <div class="model-choice">
           <label :class="{ selected: selectedModel === 'classic' }"><input v-model="selectedModel" value="classic" type="radio" name="model" /> <span><strong>Classic</strong><small>Steve · 粗手臂</small></span></label>
           <label :class="{ selected: selectedModel === 'slim' }"><input v-model="selectedModel" value="slim" type="radio" name="model" /> <span><strong>Slim</strong><small>Alex · 细手臂</small></span></label>
         </div>
         <p class="model-note">模型选择会在下一次皮肤上传时保存。</p>
-      </section>
+      </UiCard>
       <SkinUploader v-if="profile" asset="skin" :current-hash="profile.skinHash" :model="selectedModel" />
       <SkinUploader v-if="profile" asset="cape" :current-hash="profile.capeHash" :model="selectedModel" />
-      <section id="security" class="panel password-panel">
+      <UiCard as="section" id="security" class="panel password-panel">
         <div class="workspace-section-heading"><div><p class="eyebrow">02 / ACCOUNT SECURITY</p><h2>账户安全</h2></div><ShieldCheck :size="20" class="section-icon" aria-hidden="true" /></div>
         <p class="section-description">修改密码后，当前登录设备会退出，需要重新登录。</p>
         <form class="inline-form" @submit.prevent="changePassword">
@@ -67,7 +68,7 @@ async function changePassword() {
         </form>
         <p v-if="passwordMessage" class="form-success" role="status">{{ passwordMessage }}</p>
         <p v-if="passwordError" class="form-error" role="alert">{{ passwordError }}</p>
-      </section>
+      </UiCard>
     </div>
     <aside class="dashboard-side"><SkinPreview v-if="profile" :skin-hash="profile.skinHash" :model="selectedModel" /></aside>
   </div>
