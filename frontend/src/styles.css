@@ -183,9 +183,10 @@ h1, h2, h3 { color: var(--text); }
 .workspace-nav-link { display: flex; min-height: 44px; align-items: center; gap: 11px; padding: 0 12px; color: var(--muted); border: 1px solid transparent; border-radius: var(--radius-sm); font-size: .86rem; transition: color var(--motion), background var(--motion), border-color var(--motion); }
 .workspace-nav-link:hover { color: var(--text); background: var(--surface-hover); }
 .workspace-nav-link.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, transparent); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
-.workspace-sidebar-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding: 14px 10px 0; color: var(--muted-strong); border-top: 1px solid var(--border); font-size: .65rem; }
-.workspace-sidebar-footer a { color: var(--muted); }
-.workspace-sidebar-footer a:hover { color: var(--accent); }
+.workspace-sidebar-footer { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: auto; padding: 14px 10px 0; color: var(--muted-strong); border-top: 1px solid var(--border); font-size: .65rem; }
+.workspace-sidebar-footer a, .workspace-logout { color: var(--muted); }
+.workspace-sidebar-footer a:hover, .workspace-logout:hover { color: var(--accent); }
+.workspace-logout { display: inline-flex; min-height: 32px; align-items: center; gap: 5px; padding: 0; background: transparent; font-size: .68rem; }
 .workspace-main-shell { min-height: 100dvh; margin-left: 256px; }
 .workspace-topbar { position: sticky; z-index: var(--z-topbar); top: 0; display: flex; min-height: 72px; align-items: center; justify-content: space-between; gap: 24px; padding: 0 clamp(20px, 4vw, 48px); background: color-mix(in srgb, var(--bg) 90%, transparent); border-bottom: 1px solid var(--border); backdrop-filter: blur(18px); }
 .workspace-topbar-left, .workspace-topbar-actions { display: flex; align-items: center; gap: 12px; }

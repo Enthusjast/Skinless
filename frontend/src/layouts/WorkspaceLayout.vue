@@ -67,6 +67,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
       <div class="workspace-sidebar-footer">
         <span>SKINLESS / 0.1</span>
         <RouterLink to="/" @click="sidebarOpen = false">返回首页</RouterLink>
+        <button class="workspace-logout" type="button" @click="logout"><LogOut :size="14" aria-hidden="true" />退出</button>
       </div>
     </aside>
     <div v-if="sidebarOpen" class="workspace-scrim" aria-hidden="true" @click="sidebarOpen = false" />

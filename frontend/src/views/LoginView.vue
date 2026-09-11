@@ -11,6 +11,7 @@ const route = useRoute();
 const form = reactive({ email: '', password: '' });
 const error = ref('');
 const showPassword = ref(false);
+const notice = ref(route.query.changed === '1' ? '密码已更新，请使用新密码登录。' : route.query.registered === '1' ? '账号创建成功，现在可以登录了。' : '');
 
 async function submit() {
   error.value = '';
@@ -42,6 +43,7 @@ async function submit() {
         <div class="field"><label for="email">邮箱地址</label><input id="email" v-model="form.email" type="email" autocomplete="email" placeholder="you@example.com" required /></div>
         <div class="field"><label for="password">密码</label><div class="password-field"><input id="password" v-model="form.password" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" placeholder="输入密码" required /><button class="icon-button password-toggle" type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="17" aria-hidden="true" /><Eye v-else :size="17" aria-hidden="true" /></button></div></div>
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+        <p v-if="notice" class="form-success" role="status">{{ notice }}</p>
         <button class="button button-primary" type="submit" :disabled="auth.loading"><LockKeyhole :size="17" aria-hidden="true" />{{ auth.loading ? '登录中…' : '登录' }}</button>
       </form>
       <RouterLink to="/register" class="auth-link">还没有账号？立即注册</RouterLink>

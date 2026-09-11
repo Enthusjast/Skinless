@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { Copy, KeyRound, ShieldCheck } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { ApiError } from '../api';
 import SkinPreview from '../components/SkinPreview.vue';
 import SkinUploader from '../components/SkinUploader.vue';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
+const router = useRouter();
 const passwordForm = ref({ current: '', next: '' });
 const passwordMessage = ref('');
 const passwordError = ref('');
@@ -29,7 +31,7 @@ async function changePassword() {
   try {
     await auth.updatePassword(passwordForm.value.current, passwordForm.value.next);
     passwordForm.value = { current: '', next: '' };
-    passwordMessage.value = '密码已更新，请重新登录。';
+    await router.push({ path: '/login', query: { changed: '1' } });
   } catch (cause) {
     passwordError.value = cause instanceof ApiError || cause instanceof Error ? cause.message : '修改失败。';
   } finally {
