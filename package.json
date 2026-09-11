@@ -1,0 +1,25 @@
+{
+  "name": "skinless",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "pnpm --filter @skinless/frontend build",
+    "typecheck": "tsc --noEmit && pnpm --filter @skinless/frontend typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:local": "wrangler d1 execute mc-skin-db --local --file=./migrations/0001_init.sql",
+    "frontend:dev": "pnpm --filter @skinless/frontend dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240919.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.1",
+    "wrangler": "^3.78.12"
+  }
+}

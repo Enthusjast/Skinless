@@ -1,0 +1,7 @@
+node_modules/
+frontend/dist/
+.wrangler/
+coverage/
+.env
+.env.*
+!.env.example

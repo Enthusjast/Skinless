@@ -1,0 +1,23 @@
+name = "mc-skin-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Replace this placeholder with the ID returned by `wrangler d1 create mc-skin-db`.
+[[d1_databases]]
+binding = "DB"
+database_name = "mc-skin-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "mc-skins"
+
+[triggers]
+crons = ["0 3 * * *"]
+
+[vars]
+SKIN_DOMAIN = "localhost:8787"
+API_BASE_URL = "http://localhost:8787"
+TOKEN_EXPIRY_HOURS = "24"
+CORS_ORIGIN = "*"
