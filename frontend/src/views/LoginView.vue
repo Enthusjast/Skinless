@@ -30,8 +30,8 @@ async function submit() {
   <section class="auth-layout">
     <div class="auth-intro">
       <p class="eyebrow">WELCOME BACK</p>
-      <h1>把你的身份，<em>带回游戏。</em></h1>
-      <p>使用 Skinless 账号登录外置认证服务，皮肤和角色会随你进入每一场冒险。</p>
+      <h1>登录 Minecraft 身份</h1>
+      <p>使用账号登录外置认证服务，管理当前角色和纹理。</p>
       <div class="auth-perks"><span><ShieldCheck :size="18" aria-hidden="true" />安全的 Bearer token</span><span><Sparkles :size="18" aria-hidden="true" />全球边缘低延迟</span></div>
       <div class="auth-visual" aria-hidden="true"><span v-for="index in 24" :key="index" /></div>
     </div>

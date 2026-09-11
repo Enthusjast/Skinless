@@ -53,8 +53,8 @@ async function logout() {
       <RouterView />
     </main>
     <footer class="public-footer">
-      <span>Skinless · Minecraft 外置登录与皮肤身份</span>
-      <span>轻量、开放、属于你的角色。</span>
+      <span>Skinless · Minecraft 外置登录与皮肤管理</span>
+      <span>账号、皮肤与披风管理</span>
     </footer>
   </div>
 </template>

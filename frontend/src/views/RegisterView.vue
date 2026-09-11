@@ -38,8 +38,8 @@ async function submit() {
   <section class="auth-layout">
     <div class="auth-intro">
       <p class="eyebrow">START HERE</p>
-      <h1>给你的角色，<em>一个家。</em></h1>
-      <p>创建 Skinless 账号，上传属于自己的皮肤，把稳定的游戏身份带进服务器。</p>
+      <h1>创建 Minecraft 账号</h1>
+      <p>创建账号后可设置游戏名、上传皮肤和披风。</p>
       <div class="auth-checklist"><span><Check :size="17" aria-hidden="true" />一个账号，一个 Minecraft profile</span><span><Check :size="17" aria-hidden="true" />浏览器处理图片，上传更轻量</span><span><Check :size="17" aria-hidden="true" />随时切换 Classic / Slim 模型</span></div>
       <div class="auth-visual" aria-hidden="true"><span v-for="index in 24" :key="index" /></div>
     </div>

@@ -8,8 +8,8 @@ const auth = useAuthStore();
 <template>
   <section class="hero">
     <p class="eyebrow">CLOUDFLARE · YGGDRASIL · 0.1</p>
-    <h1>让你的角色，<em>真正属于你。</em></h1>
-    <p class="hero-copy">Skinless 是一个轻量的 Minecraft 外置登录与皮肤服务。注册一个账号，把自己的皮肤带进每一场冒险。</p>
+    <h1>Minecraft 外置登录与皮肤管理</h1>
+    <p class="hero-copy">在一个地方管理 Minecraft 登录身份、皮肤和披风。</p>
     <div class="hero-actions">
       <RouterLink :to="auth.isAuthenticated ? '/dashboard' : '/register'" class="button button-primary">{{ auth.isAuthenticated ? '打开工作台' : '创建账号' }}<ArrowRight :size="17" aria-hidden="true" /></RouterLink>
       <RouterLink v-if="!auth.isAuthenticated" to="/login" class="button button-ghost">已有账号，登录</RouterLink>
