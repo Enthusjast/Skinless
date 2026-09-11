@@ -22,7 +22,7 @@ function partStyle(x: number, y: number, width: number, height: number) {
 </script>
 
 <template>
-  <div class="preview-card">
+  <div class="preview-card" role="img" :aria-label="skinHash ? `${model === 'slim' ? 'Slim' : 'Classic'} 皮肤预览` : '暂无皮肤预览'">
     <div class="preview-heading"><span>LIVE PREVIEW</span><small>{{ model === 'slim' ? 'ALEX / SLIM' : 'STEVE / CLASSIC' }}</small></div>
     <div v-if="skinHash" class="skin-stage" aria-label="皮肤 2D 预览">
       <div class="skin-row skin-head-row"><div class="texture-part skin-head" :style="partStyle(8, 8, 8, 8)" /></div>

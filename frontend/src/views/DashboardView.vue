@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Copy, KeyRound, ShieldCheck } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import { ApiError } from '../api';
 import SkinPreview from '../components/SkinPreview.vue';
@@ -12,6 +13,14 @@ const passwordError = ref('');
 const passwordBusy = ref(false);
 const profile = computed(() => auth.profile);
 const selectedModel = ref<'classic' | 'slim'>(auth.profile?.skinModel ?? 'classic');
+const copied = ref(false);
+
+async function copyProfileId() {
+  if (!profile.value?.id) return;
+  await navigator.clipboard?.writeText(profile.value.id);
+  copied.value = true;
+  window.setTimeout(() => { copied.value = false; }, 1800);
+}
 
 async function changePassword() {
   passwordBusy.value = true;
@@ -30,14 +39,14 @@ async function changePassword() {
 </script>
 
 <template>
-  <section class="dashboard-heading">
-    <div><p class="eyebrow">PLAYER DASHBOARD</p><h1>你好，{{ profile?.name }}</h1><p>管理你的游戏身份和纹理资产。</p></div>
-    <span class="profile-chip">{{ auth.user?.email }}</span>
+  <section class="profile-summary-card">
+    <div class="profile-summary-main"><span class="profile-avatar-large">{{ profile?.name?.slice(0, 1).toUpperCase() }}</span><div><p class="eyebrow">ACTIVE PROFILE</p><h2>{{ profile?.name }}</h2><p>{{ auth.user?.email }}</p></div></div>
+    <div class="profile-summary-meta"><span class="status-badge"><i class="status-dot" />已连接</span><button class="copy-id-button" type="button" :aria-label="copied ? 'Profile ID 已复制' : '复制 Profile ID'" @click="copyProfileId"><Copy :size="15" aria-hidden="true" />{{ copied ? '已复制' : '复制 Profile ID' }}</button><code>{{ profile?.id }}</code></div>
   </section>
   <div class="dashboard-grid">
     <div class="dashboard-main">
-      <section class="panel model-panel">
-        <div class="panel-heading"><div><p class="eyebrow">APPEARANCE</p><h2>你的角色</h2></div><span class="mono-id">{{ profile?.id }}</span></div>
+      <section id="appearance" class="panel model-panel">
+        <div class="workspace-section-heading"><div><p class="eyebrow">01 / APPEARANCE</p><h2>你的角色</h2></div><span class="section-caption">选择模型后上传对应纹理</span></div>
         <div class="model-choice">
           <label :class="{ selected: selectedModel === 'classic' }"><input v-model="selectedModel" value="classic" type="radio" name="model" /> <span><strong>Classic</strong><small>Steve · 粗手臂</small></span></label>
           <label :class="{ selected: selectedModel === 'slim' }"><input v-model="selectedModel" value="slim" type="radio" name="model" /> <span><strong>Slim</strong><small>Alex · 细手臂</small></span></label>
@@ -46,12 +55,13 @@ async function changePassword() {
       </section>
       <SkinUploader v-if="profile" asset="skin" :current-hash="profile.skinHash" :model="selectedModel" />
       <SkinUploader v-if="profile" asset="cape" :current-hash="profile.capeHash" :model="selectedModel" />
-      <section class="panel password-panel">
-        <div class="panel-heading"><div><p class="eyebrow">ACCOUNT SECURITY</p><h2>修改密码</h2></div></div>
+      <section id="security" class="panel password-panel">
+        <div class="workspace-section-heading"><div><p class="eyebrow">02 / ACCOUNT SECURITY</p><h2>账户安全</h2></div><ShieldCheck :size="20" class="section-icon" aria-hidden="true" /></div>
+        <p class="section-description">修改密码后，当前登录设备会退出，需要重新登录。</p>
         <form class="inline-form" @submit.prevent="changePassword">
           <div class="field"><label for="current-password">当前密码</label><input id="current-password" v-model="passwordForm.current" type="password" autocomplete="current-password" required /></div>
           <div class="field"><label for="new-password">新密码</label><input id="new-password" v-model="passwordForm.next" type="password" autocomplete="new-password" minlength="8" required /></div>
-          <button class="button button-primary button-small" type="submit" :disabled="passwordBusy">{{ passwordBusy ? '保存中…' : '更新密码' }}</button>
+          <button class="button button-primary button-small" type="submit" :disabled="passwordBusy"><KeyRound :size="16" aria-hidden="true" />{{ passwordBusy ? '保存中…' : '更新密码' }}</button>
         </form>
         <p v-if="passwordMessage" class="form-success" role="status">{{ passwordMessage }}</p>
         <p v-if="passwordError" class="form-error" role="alert">{{ passwordError }}</p>
