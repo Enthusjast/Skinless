@@ -31,16 +31,23 @@ async function logout() {
           <span class="public-menu-name">{{ auth.profile?.name }}</span>
           <Menu :size="16" aria-hidden="true" />
         </button>
-        <ThemeToggle />
       </nav>
+      <ThemeToggle />
       <button class="mobile-menu-button icon-button" type="button" aria-label="打开导航" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">
         <X v-if="menuOpen" :size="20" aria-hidden="true" />
         <Menu v-else :size="20" aria-hidden="true" />
       </button>
     </header>
-    <div v-if="menuOpen && auth.isAuthenticated" class="public-user-menu" role="menu">
-      <RouterLink to="/dashboard" role="menuitem" @click="menuOpen = false">打开工作台</RouterLink>
-      <button type="button" role="menuitem" @click="logout"><LogOut :size="16" aria-hidden="true" />退出登录</button>
+    <div v-if="menuOpen" class="public-mobile-menu" role="menu">
+      <template v-if="auth.isAuthenticated">
+        <RouterLink to="/dashboard" role="menuitem" @click="menuOpen = false">打开工作台</RouterLink>
+        <button type="button" role="menuitem" @click="logout"><LogOut :size="16" aria-hidden="true" />退出登录</button>
+      </template>
+      <template v-else>
+        <RouterLink to="/" role="menuitem" @click="menuOpen = false">首页</RouterLink>
+        <RouterLink to="/login" role="menuitem" @click="menuOpen = false">登录</RouterLink>
+        <RouterLink to="/register" role="menuitem" @click="menuOpen = false">创建账号</RouterLink>
+      </template>
     </div>
     <main id="main-content" class="public-main" tabindex="-1">
       <RouterView />
