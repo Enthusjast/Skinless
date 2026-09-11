@@ -27,9 +27,9 @@ function partStyle(x: number, y: number, width: number, height: number) {
     <div v-if="skinHash" class="skin-stage" aria-label="皮肤 2D 预览">
       <div class="skin-row skin-head-row"><div class="texture-part skin-head" :style="partStyle(8, 8, 8, 8)" /></div>
       <div class="skin-row skin-body-row">
-        <div class="texture-part skin-limb" :style="partStyle(44, 20, 4, 12)" />
+        <div class="texture-part skin-limb" :style="partStyle(44, 20, model === 'slim' ? 3 : 4, 12)" />
         <div class="texture-part skin-body" :style="partStyle(20, 20, 8, 12)" />
-        <div class="texture-part skin-limb" :style="partStyle(36, 52, 4, 12)" />
+        <div class="texture-part skin-limb" :style="partStyle(36, 52, model === 'slim' ? 3 : 4, 12)" />
       </div>
       <div class="skin-row skin-legs-row">
         <div class="texture-part skin-leg" :style="partStyle(4, 20, 4, 12)" />
