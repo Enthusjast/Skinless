@@ -3,6 +3,7 @@ import type { AppEnv } from './types';
 import authRoutes from './routes/auth';
 import sessionRoutes from './routes/session';
 import textureRoutes from './routes/textures';
+import apiRoutes from './routes/api';
 import { corsMiddleware } from './middleware/cors';
 import { metadata } from './utils/config';
 
@@ -18,6 +19,7 @@ app.route('/', sessionRoutes);
 app.route('/api/yggdrasil', sessionRoutes);
 app.route('/', textureRoutes);
 app.route('/api/yggdrasil', textureRoutes);
+app.route('/api', apiRoutes);
 
 app.notFound((c) => c.json({ error: 'NotFound', errorMessage: 'Resource not found.' }, 404));
 

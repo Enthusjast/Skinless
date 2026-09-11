@@ -12,6 +12,8 @@ export interface TokenContextRow extends TokenRecord {
   user_password: string;
   user_salt: string;
   user_role: UserRole;
+  user_created_at: number;
+  user_updated_at: number;
   profile_name: string;
   skin_hash: string | null;
   cape_hash: string | null;
@@ -48,6 +50,7 @@ export async function findTokenContext(
       `SELECT
         t.access_token, t.client_token, t.user_id, t.profile_id, t.created_at, t.expires_at,
         u.email AS user_email, u.password AS user_password, u.salt AS user_salt, u.role AS user_role,
+        u.created_at AS user_created_at, u.updated_at AS user_updated_at,
         p.name AS profile_name, p.skin_hash, p.cape_hash, p.skin_model
        FROM tokens t
        INNER JOIN users u ON u.id = t.user_id

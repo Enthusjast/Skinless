@@ -20,8 +20,8 @@ export const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
     password: row.user_password,
     salt: row.user_salt,
     role: row.user_role,
-    created_at: 0,
-    updated_at: 0,
+    created_at: row.user_created_at,
+    updated_at: row.user_updated_at,
   };
   const profile: ProfileRecord = {
     id: row.profile_id,
