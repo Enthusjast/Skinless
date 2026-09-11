@@ -70,6 +70,12 @@ describe('Yggdrasil session and texture API', () => {
     expect(response.status).toBe(204);
   });
 
+  it('caches successful hasJoined responses at the edge for one minute', async () => {
+    const response = await app.request('/sessionserver/session/minecraft/hasJoined?username=PlayerOne&serverId=server-id', {}, env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('public, max-age=60');
+  });
+
   it('returns private R2 content with immutable caching', async () => {
     const response = await app.request('/textures/' + profile.skin_hash, {}, env);
 

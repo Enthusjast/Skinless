@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AppEnv } from './types';
+import type { AppEnv, Bindings } from './types';
 import authRoutes from './routes/auth';
 import sessionRoutes from './routes/session';
 import textureRoutes from './routes/textures';
@@ -21,9 +21,18 @@ app.route('/', textureRoutes);
 app.route('/api/yggdrasil', textureRoutes);
 app.route('/api', apiRoutes);
 
+app.onError((error, c) => {
+  console.error(error);
+  return c.json({ error: 'InternalServerError', errorMessage: 'Internal server error.' }, 500);
+});
+
 app.notFound((c) => c.json({ error: 'NotFound', errorMessage: 'Resource not found.' }, 404));
 
-export default {
+const worker: ExportedHandler<Bindings> = {
   fetch: app.fetch,
-  scheduled: async () => undefined,
+  scheduled: async (_controller, env) => {
+    await env.DB.prepare('DELETE FROM tokens WHERE expires_at < ?').bind(Date.now()).run();
+  },
 };
+
+export default worker;

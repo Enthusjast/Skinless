@@ -42,6 +42,10 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function asPassword(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -129,11 +133,12 @@ async function deleteAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
 routes.post('/register', async (c) => {
   const body = await readJson<RegisterInput>(c);
   const email = asString(body?.email)?.toLowerCase();
-  const password = asString(body?.password);
+  const password = asPassword(body?.password);
   const name = asString(body?.name);
   if (!email || !password || !name) return jsonError(c, 400, 'email, password and name are required.');
   if (!isValidEmail(email)) return jsonError(c, 400, 'A valid email address is required.');
   if (password.length < 8) return jsonError(c, 400, 'Password must be at least 8 characters.');
+  if (password.length > 256) return jsonError(c, 400, 'Password must be 256 characters or fewer.');
   if (!isValidProfileName(name)) return jsonError(c, 400, 'Game name must be 3-16 letters, numbers or underscores.');
 
   const now = Date.now();
@@ -172,10 +177,11 @@ routes.get('/user/profile', authMiddleware, (c) => {
 
 routes.put('/user/password', authMiddleware, async (c) => {
   const body = await readJson<PasswordInput>(c);
-  const currentPassword = asString(body?.currentPassword);
-  const newPassword = asString(body?.newPassword);
+  const currentPassword = asPassword(body?.currentPassword);
+  const newPassword = asPassword(body?.newPassword);
   if (!currentPassword || !newPassword) return jsonError(c, 400, 'currentPassword and newPassword are required.');
   if (newPassword.length < 8) return jsonError(c, 400, 'Password must be at least 8 characters.');
+  if (newPassword.length > 256) return jsonError(c, 400, 'Password must be 256 characters or fewer.');
   const user = c.get('user');
   if (!await verifyPassword(currentPassword, user.salt, user.password)) {
     return jsonError(c, 403, 'The current password is incorrect.', 'Forbidden');

@@ -32,6 +32,7 @@ routes.get('/sessionserver/session/minecraft/hasJoined', async (c) => {
     return jsonError(c, 400, 'username and serverId are required.');
   }
 
+  c.header('Cache-Control', 'public, max-age=60');
   const profile = await findProfileByName(c.env.DB, username);
   if (!profile) return c.body(null, 204);
   return profileResponse(c, profile);

@@ -43,6 +43,10 @@ function asNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
+function asPassword(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 function profileResponse(profile: ProfileRecord): { id: string; name: string } {
   return { id: profile.id, name: profile.name };
 }
@@ -87,8 +91,9 @@ routes.post('/authserver/authenticate', async (c) => {
 
   const body = await readJson<AuthenticateRequest>(c);
   const username = asNonEmptyString(body?.username);
-  const password = asNonEmptyString(body?.password);
+  const password = asPassword(body?.password);
   if (!username || !password) return yggError(c, 400, 'username and password are required.');
+  if (password.length > 256) return yggError(c, 400, 'password must be 256 characters or fewer.');
 
   const email = username.toLowerCase();
   const user = await findUserByEmail(c.env.DB, email);
@@ -176,8 +181,9 @@ routes.post('/authserver/signout', async (c) => {
   }
   const body = await readJson<AuthenticateRequest>(c);
   const username = asNonEmptyString(body?.username);
-  const password = asNonEmptyString(body?.password);
+  const password = asPassword(body?.password);
   if (!username || !password) return yggError(c, 400, 'username and password are required.');
+  if (password.length > 256) return yggError(c, 400, 'password must be 256 characters or fewer.');
 
   const user = await findUserByEmail(c.env.DB, username.toLowerCase());
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
