@@ -12,8 +12,7 @@ import {
 } from '../db/queries';
 import { getClientKey, isLoginAllowed, clearLoginFailures, recordLoginFailure } from '../middleware/ratelimit';
 import { createAccessToken, verifyPassword } from '../utils/crypto';
-import { getTokenExpiryMs } from '../utils/config';
-import { metadata } from '../utils/config';
+import { getTokenExpiryMs, metadata } from '../utils/config';
 import { readJson, yggError } from '../utils/errors';
 import type { AppEnv, ProfileRecord, TokenRecord, UserRecord } from '../types';
 

@@ -6,7 +6,8 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/i;
 
 routes.get('/textures/:hash', async (c) => {
   const rawHash = c.req.param('hash');
-  const hash = rawHash.toLowerCase().endsWith('.png') ? rawHash.slice(0, -4) : rawHash;
+  const normalizedHash = rawHash.toLowerCase();
+  const hash = normalizedHash.endsWith('.png') ? normalizedHash.slice(0, -4) : normalizedHash;
   if (!HASH_PATTERN.test(hash)) return c.body(null, 404);
 
   const object = await c.env.BUCKET.get(`${hash}.png`);

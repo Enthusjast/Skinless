@@ -84,4 +84,9 @@ describe('Yggdrasil session and texture API', () => {
     expect(response.headers.get('cache-control')).toContain('immutable');
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]));
   });
+
+  it('normalizes uppercase texture hashes and optional PNG suffixes', async () => {
+    const response = await app.request('/textures/' + profile.skin_hash!.toUpperCase() + '.PNG', {}, env);
+    expect(response.status).toBe(200);
+  });
 });
