@@ -132,10 +132,13 @@ h1, h2, h3 { color: var(--text); }
 
 /* Home */
 .hero { position: relative; min-height: 550px; display: grid; align-content: center; max-width: 780px; padding: 90px 0 80px; }
+.hero-minimal { max-width: none; min-height: calc(100dvh - 170px); align-items: center; justify-items: center; padding: 40px 0 72px; }
+.hero-minimal::before { display: none; }
 .hero::before { position: absolute; z-index: 0; top: 36px; right: -180px; width: 420px; height: 420px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); background: transparent; opacity: .6; transform: rotate(12deg); pointer-events: none; }
 .hero > * { position: relative; z-index: 1; }
 .hero h1 { max-width: 740px; margin: 22px 0 20px; font-size: clamp(2.7rem, 8vw, 6.25rem); line-height: 1.03; letter-spacing: -.075em; }
 .hero h1 em { color: var(--accent); font-style: normal; }
+.hero-minimal h1 { max-width: none; margin: 0; font-size: clamp(3.5rem, 12vw, 9rem); text-align: center; }
 .hero-copy { max-width: 560px; margin: 0; color: var(--text-soft); font-size: 1.08rem; line-height: 1.75; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
 .hero-meta { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 28px; color: var(--muted); font-size: .74rem; }
@@ -329,6 +332,7 @@ td select { min-height: 44px; padding: 0 10px; color: var(--text); background: v
   .public-mobile-menu { top: 60px; right: 16px; left: 16px; }
   .public-footer { display: grid; gap: 6px; }
   .hero { min-height: 520px; padding: 58px 0 64px; }
+  .hero-minimal { min-height: calc(100dvh - 138px); padding: 32px 0 48px; }
   .hero::before { right: -260px; opacity: .35; }
   .feature-grid { grid-template-columns: 1fr; padding-bottom: 46px; }
   .auth-card { padding: 24px; }
