@@ -11,6 +11,11 @@ export interface ApiProfile {
   skinModel: 'classic' | 'slim';
 }
 
+export interface ProfileCollection {
+  profiles: ApiProfile[];
+  defaultProfileId: string | null;
+}
+
 export interface ApiUser {
   id: string;
   email: string;
@@ -23,10 +28,11 @@ export interface ApiUser {
 export interface AuthResponse {
   accessToken: string;
   clientToken: string;
+  availableProfiles: Array<{ id: string; name: string }>;
   selectedProfile: { id: string; name: string };
 }
 
-export interface WebAuthResponse {
+export interface WebAuthResponse extends ProfileCollection {
   user: ApiUser;
   csrfToken: string;
 }
@@ -258,8 +264,44 @@ export function logout(): Promise<void> {
   return managementRequest<void>('/api/auth/logout', { method: 'POST' }).finally(clearCsrfToken);
 }
 
-export function getUserProfile(): Promise<{ user: ApiUser }> {
-  return managementRequest<{ user: ApiUser }>('/api/user/profile');
+export function getUserProfile(): Promise<{ user: ApiUser } & ProfileCollection> {
+  return managementRequest<{ user: ApiUser } & ProfileCollection>('/api/user/profile');
+}
+
+export function getProfiles(): Promise<ProfileCollection> {
+  return managementRequest<ProfileCollection>('/api/user/profiles');
+}
+
+export function createProfile(name: string): Promise<{ profile: ApiProfile } & ProfileCollection> {
+  return managementRequest<{ profile: ApiProfile } & ProfileCollection>('/api/user/profiles', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function renameProfile(
+  profileId: string,
+  name: string,
+): Promise<{ profile: ApiProfile } & ProfileCollection> {
+  return managementRequest<{ profile: ApiProfile } & ProfileCollection>(
+    `/api/user/profiles/${encodeURIComponent(profileId)}`,
+    { method: 'PATCH', body: JSON.stringify({ name }) },
+  );
+}
+
+export function deleteProfile(profileId: string): Promise<void> {
+  return managementRequest<void>(`/api/user/profiles/${encodeURIComponent(profileId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function setDefaultProfile(
+  profileId: string,
+): Promise<{ user: ApiUser } & ProfileCollection> {
+  return managementRequest<{ user: ApiUser } & ProfileCollection>(
+    `/api/user/profiles/${encodeURIComponent(profileId)}/default`,
+    { method: 'PUT' },
+  );
 }
 
 export function changePassword(currentPassword: string, newPassword: string): Promise<void> {

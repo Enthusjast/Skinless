@@ -36,6 +36,8 @@ export interface WebSessionSummary {
   last_used_at: number;
 }
 
+export const MAX_PROFILES_PER_USER = 5;
+
 export async function findUserByEmail(db: D1Database, email: string): Promise<UserRecord | null> {
   return db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first<UserRecord>();
 }
@@ -45,7 +47,36 @@ export async function findUserById(db: D1Database, id: string): Promise<UserReco
 }
 
 export async function findProfileByUserId(db: D1Database, userId: string): Promise<ProfileRecord | null> {
-  return db.prepare('SELECT * FROM profiles WHERE user_id = ? LIMIT 1').bind(userId).first<ProfileRecord>();
+  return db
+    .prepare(
+      `SELECT * FROM profiles
+       WHERE user_id = ?
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1`,
+    )
+    .bind(userId)
+    .first<ProfileRecord>();
+}
+
+export async function findDefaultProfileByUserId(db: D1Database, userId: string): Promise<ProfileRecord | null> {
+  const user = await findUserById(db, userId);
+  if (user?.default_profile_id) {
+    const profile = await findProfileById(db, user.default_profile_id);
+    if (profile?.user_id === userId) return profile;
+  }
+  return findProfileByUserId(db, userId);
+}
+
+export async function listProfilesByUserId(db: D1Database, userId: string): Promise<ProfileRecord[]> {
+  const result = await db
+    .prepare(
+      `SELECT * FROM profiles
+       WHERE user_id = ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .bind(userId)
+    .all<ProfileRecord>();
+  return result.results;
 }
 
 export async function findProfileById(db: D1Database, profileId: string): Promise<ProfileRecord | null> {
@@ -53,7 +84,29 @@ export async function findProfileById(db: D1Database, profileId: string): Promis
 }
 
 export async function findProfileByName(db: D1Database, name: string): Promise<ProfileRecord | null> {
-  return db.prepare('SELECT * FROM profiles WHERE name = ? LIMIT 1').bind(name).first<ProfileRecord>();
+  return db
+    .prepare('SELECT * FROM profiles WHERE name = ? COLLATE NOCASE LIMIT 1')
+    .bind(name)
+    .first<ProfileRecord>();
+}
+
+export async function findProfileByIdForUser(
+  db: D1Database,
+  profileId: string,
+  userId: string,
+): Promise<ProfileRecord | null> {
+  return db
+    .prepare('SELECT * FROM profiles WHERE id = ? AND user_id = ? LIMIT 1')
+    .bind(profileId, userId)
+    .first<ProfileRecord>();
+}
+
+export async function countProfilesByUserId(db: D1Database, userId: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT COUNT(*) AS count FROM profiles WHERE user_id = ?')
+    .bind(userId)
+    .first<{ count: number }>();
+  return Number(row?.count ?? 0);
 }
 
 export async function findTokenContext(
@@ -86,17 +139,90 @@ export async function insertUserAndProfile(
   await db.batch([
     db
       .prepare(
-        `INSERT INTO users (id, email, password, salt, role, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, email, password, salt, role, created_at, updated_at, default_profile_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
       )
       .bind(user.id, user.email, user.password, user.salt, user.role, user.created_at, user.updated_at),
     db
       .prepare(
-        `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(profile.id, profile.user_id, profile.name, profile.skin_hash, profile.cape_hash, profile.skin_model),
+      .bind(
+        profile.id,
+        profile.user_id,
+        profile.name,
+        profile.skin_hash,
+        profile.cape_hash,
+        profile.skin_model,
+        profile.created_at ?? user.created_at,
+        profile.updated_at ?? user.updated_at,
+      ),
+    db
+      .prepare('UPDATE users SET default_profile_id = ? WHERE id = ? AND default_profile_id IS NULL')
+      .bind(profile.id, user.id),
   ]);
+}
+
+export async function insertProfileBelowLimit(
+  db: D1Database,
+  profile: ProfileRecord,
+  limit = MAX_PROFILES_PER_USER,
+): Promise<boolean> {
+  const timestamp = Date.now();
+  const result = await db
+    .prepare(
+      `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM profiles WHERE user_id = ?) < ?`,
+    )
+    .bind(
+      profile.id,
+      profile.user_id,
+      profile.name,
+      profile.skin_hash,
+      profile.cape_hash,
+      profile.skin_model,
+      profile.created_at ?? timestamp,
+      profile.updated_at ?? timestamp,
+      profile.user_id,
+      limit,
+    )
+    .run();
+  return (result.meta?.changes ?? 1) > 0;
+}
+
+export async function updateProfileName(
+  db: D1Database,
+  profileId: string,
+  name: string,
+  updatedAt: number,
+): Promise<void> {
+  await db.prepare('UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?').bind(name, updatedAt, profileId).run();
+}
+
+export async function setDefaultProfile(
+  db: D1Database,
+  userId: string,
+  profileId: string,
+  updatedAt: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE users
+       SET default_profile_id = ?, updated_at = ?
+       WHERE id = ? AND EXISTS (
+         SELECT 1 FROM profiles WHERE id = ? AND user_id = ?
+       )`,
+    )
+    .bind(profileId, updatedAt, userId, profileId, userId)
+    .run();
+  return (result.meta?.changes ?? 1) > 0;
+}
+
+export async function deleteProfile(db: D1Database, profileId: string, userId: string): Promise<boolean> {
+  const result = await db.prepare('DELETE FROM profiles WHERE id = ? AND user_id = ?').bind(profileId, userId).run();
+  return (result.meta?.changes ?? 1) > 0;
 }
 
 export async function insertToken(db: D1Database, token: TokenRecord): Promise<void> {
@@ -308,7 +434,10 @@ export async function listUsers(db: D1Database, limit: number, offset: number): 
         u.id, u.email, u.password, u.salt, u.role, u.created_at, u.updated_at,
         p.id AS profile_id, p.name AS profile_name, p.skin_hash, p.cape_hash, p.skin_model
        FROM users u
-       INNER JOIN profiles p ON p.user_id = u.id
+       INNER JOIN profiles p ON p.id = COALESCE(
+         u.default_profile_id,
+         (SELECT fallback.id FROM profiles fallback WHERE fallback.user_id = u.id ORDER BY fallback.created_at ASC, fallback.id ASC LIMIT 1)
+       )
        ORDER BY u.created_at DESC
        LIMIT ? OFFSET ?`,
     )

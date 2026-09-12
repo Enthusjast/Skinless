@@ -36,6 +36,7 @@ export interface UserRecord {
   role: UserRole;
   created_at: number;
   updated_at: number;
+  default_profile_id?: string | null;
 }
 
 export interface ProfileRecord {
@@ -45,6 +46,8 @@ export interface ProfileRecord {
   skin_hash: string | null;
   cape_hash: string | null;
   skin_model: SkinModel;
+  created_at?: number;
+  updated_at?: number;
 }
 
 export interface TokenRecord {

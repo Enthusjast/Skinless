@@ -129,6 +129,54 @@ function cookieHeader(setCookie: string): string {
 }
 
 describe('Cloudflare runtime integration', () => {
+  it('applies the multiple-profile migration with default tracking and preserved references', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '');
+    const userId = `migration-user-${suffix}`;
+    const firstProfileId = `a${suffix.slice(0, 31)}`;
+    const secondProfileId = `b${suffix.slice(0, 31)}`;
+    const now = Date.now();
+
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, password, salt, role, created_at, updated_at, default_profile_id)
+       VALUES (?, ?, ?, ?, 'user', ?, ?, NULL)`,
+    ).bind(userId, `${suffix}@example.com`, 'hashed', 'salt', now, now).run();
+    await env.DB.prepare(
+      `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(firstProfileId, userId, `Legacy${suffix.slice(0, 8)}`, 'skin-hash', 'cape-hash', 'classic', now, now).run();
+    await env.DB.prepare('UPDATE users SET default_profile_id = ? WHERE id = ?').bind(firstProfileId, userId).run();
+    await env.DB.prepare(
+      `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, NULL, 'slim', ?, ?)`,
+    ).bind(secondProfileId, userId, `Second${suffix.slice(0, 8)}`, now + 1, now + 1).run();
+    await env.DB.prepare(
+      `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(`migration-token-${suffix}`, 'client', userId, firstProfileId, now, now + 60_000).run();
+    await env.DB.prepare(
+      `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).bind(`migration-server-${suffix}`, firstProfileId, userId, now, now + 60_000).run();
+
+    const userRow = await env.DB.prepare('SELECT default_profile_id FROM users WHERE id = ?').bind(userId).first<{ default_profile_id: string }>();
+    const profiles = await env.DB.prepare(
+      'SELECT id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at FROM profiles WHERE user_id = ? ORDER BY created_at ASC',
+    ).bind(userId).all<Record<string, unknown>>();
+    const tokenRow = await env.DB.prepare('SELECT profile_id FROM tokens WHERE access_token = ?').bind(`migration-token-${suffix}`).first<{ profile_id: string }>();
+    const sessionRow = await env.DB.prepare('SELECT profile_id FROM server_sessions WHERE server_id = ?').bind(`migration-server-${suffix}`).first<{ profile_id: string }>();
+
+    expect(userRow).toEqual({ default_profile_id: firstProfileId });
+    expect(profiles.results).toHaveLength(2);
+    expect(profiles.results[0]).toMatchObject({ id: firstProfileId, skin_hash: 'skin-hash', cape_hash: 'cape-hash', created_at: now, updated_at: now });
+    expect(tokenRow).toEqual({ profile_id: firstProfileId });
+    expect(sessionRow).toEqual({ profile_id: firstProfileId });
+
+    await expect(env.DB.prepare(
+      `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, NULL, 'classic', ?, ?)`,
+    ).bind(`c${suffix.slice(0, 31)}`, userId, `legacy${suffix.slice(0, 8)}`, now + 2, now + 2).run()).rejects.toThrow();
+  });
+
   it('completes the account, texture, and server join path using D1 and R2', async () => {
     const registerResponse = await jsonRequest('/api/register', {
       email: EMAIL,

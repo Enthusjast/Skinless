@@ -41,7 +41,7 @@ async function submit() {
       <h1>创建 Minecraft 账号</h1>
       <p>创建账号后可设置游戏名、上传皮肤和披风。</p>
       <div class="auth-checklist">
-        <span><Check :size="17" aria-hidden="true" />一个账号，一个 Minecraft profile</span
+        <span><Check :size="17" aria-hidden="true" />一个账号，最多五个 Minecraft profile</span
         ><span><Check :size="17" aria-hidden="true" />浏览器处理图片，上传更轻量</span
         ><span><Check :size="17" aria-hidden="true" />随时切换 Classic / Slim 模型</span>
       </div>

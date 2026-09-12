@@ -2,14 +2,20 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import {
   countAssetReferences,
+  countProfilesByUserId,
+  deleteProfile,
   deleteUserTokens,
+  findDefaultProfileByUserId,
   findUserByEmail,
   findUserById,
-  findProfileByUserId,
+  findProfileByIdForUser,
+  findProfileByName,
+  insertProfileBelowLimit,
   insertUserAndProfile,
   insertWebSession,
   isConstraintViolation,
   listUsers,
+  listProfilesByUserId,
   findWebSessionById,
   listWebSessions,
   revokeWebSession,
@@ -17,8 +23,11 @@ import {
   revokeUserWebSessions,
   rotateWebSession,
   updatePassword,
+  updateProfileName,
   updateProfileAsset,
   updateUserRole,
+  MAX_PROFILES_PER_USER,
+  setDefaultProfile,
 } from '../db/queries';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import {
@@ -68,6 +77,10 @@ interface RoleInput {
   role?: unknown;
 }
 
+interface ProfileNameInput {
+  name?: unknown;
+}
+
 type MultipartBody = Record<string, string | File | (string | File)[]>;
 
 const routes = new Hono<AppEnv>();
@@ -86,6 +99,42 @@ function isValidEmail(email: string): boolean {
 
 function isValidProfileName(name: string): boolean {
   return /^[A-Za-z0-9_]{3,16}$/.test(name);
+}
+
+function profileNotFound(c: Context<AppEnv>): Response {
+  return jsonError(c, 404, 'Profile not found.', 'NotFound', 'profile_not_found');
+}
+
+function profileNameConflict(c: Context<AppEnv>): Response {
+  return jsonError(c, 409, 'The game name is already in use.', 'Conflict', 'profile_name_taken');
+}
+
+function profileLimitReached(c: Context<AppEnv>): Response {
+  return jsonError(c, 409, 'Each account may have up to five profiles.', 'Conflict', 'profile_limit_reached');
+}
+
+function lastProfileProtected(c: Context<AppEnv>): Response {
+  return jsonError(c, 409, 'The last profile cannot be deleted.', 'Conflict', 'last_profile');
+}
+
+async function profileCollection(c: Context<AppEnv>, userId = c.get('user').id) {
+  const profiles = await listProfilesByUserId(c.env.DB, userId);
+  const currentUser = c.get('user');
+  const user = currentUser && userId === currentUser.id ? currentUser : await findUserById(c.env.DB, userId);
+  const defaultProfileId = user?.default_profile_id && profiles.some((profile) => profile.id === user.default_profile_id)
+    ? user.default_profile_id
+    : profiles[0]?.id ?? null;
+  return {
+    profiles: profiles.map(serializeProfile),
+    defaultProfileId,
+  };
+}
+
+async function profilePayload(c: Context<AppEnv>, profile: ProfileRecord, user = c.get('user')) {
+  return {
+    profile: serializeProfile(profile),
+    ...(await profileCollection(c, user.id)),
+  };
 }
 
 function skinModel(value: unknown): SkinModel | null {
@@ -215,6 +264,8 @@ routes.post('/register', async (c) => {
     skin_hash: null,
     cape_hash: null,
     skin_model: 'classic',
+    created_at: now,
+    updated_at: now,
   };
 
   try {
@@ -258,7 +309,7 @@ routes.post('/auth/login', async (c) => {
     return jsonError(c, 401, 'Invalid email or password.', 'Unauthorized');
   }
 
-  const profile = await findProfileByUserId(c.env.DB, user.id);
+  const profile = await findDefaultProfileByUserId(c.env.DB, user.id);
   const secret = c.env.WEB_SESSION_SECRET?.trim();
   if (!profile || !secret) {
     return jsonError(c, 500, 'Web sessions are not configured.', 'InternalServerError', 'internal_server_error');
@@ -285,7 +336,7 @@ routes.post('/auth/login', async (c) => {
   const accessValue = await createAccessCookieValue({ sessionId, userId: user.id, expiresAt: accessExpiresAt }, secret);
   setWebSessionCookies(c, accessValue, `${sessionId}.${refreshSecret}`, csrfToken);
   await clearLoginFailuresDistributed(c.env, clientKey);
-  return c.json({ user: serializeUser(user, profile), csrfToken });
+  return c.json({ user: serializeUser(user, profile), csrfToken, ...(await profileCollection(c, user.id)) });
 });
 
 routes.post('/auth/refresh', async (c) => {
@@ -309,7 +360,7 @@ routes.post('/auth/refresh', async (c) => {
   }
 
   const user = await findUserById(c.env.DB, session.user_id);
-  const profile = await findProfileByUserId(c.env.DB, session.user_id);
+  const profile = await findDefaultProfileByUserId(c.env.DB, session.user_id);
   if (!user || !profile) {
     await revokeWebSession(c.env.DB, session.id, Date.now());
     clearWebSessionCookies(c);
@@ -338,7 +389,11 @@ routes.post('/auth/refresh', async (c) => {
     secret,
   );
   setWebSessionCookies(c, accessValue, `${session.id}.${nextRefreshSecret}`, nextCsrfToken);
-  return c.json({ user: serializeUser(user, profile), csrfToken: nextCsrfToken });
+  return c.json({
+    user: serializeUser(user, profile),
+    csrfToken: nextCsrfToken,
+    ...(await profileCollection(c, user.id)),
+  });
 });
 
 routes.post('/auth/logout', authMiddleware, async (c) => {
@@ -384,8 +439,118 @@ routes.delete('/auth/sessions/:id', authMiddleware, async (c) => {
 });
 
 routes.get('/user/profile', authMiddleware, (c) => {
-  return c.json({ user: serializeUser(c.get('user'), c.get('profile')) });
+  return profileCollection(c).then((profiles) => c.json({
+    user: serializeUser(c.get('user'), c.get('profile')),
+    ...profiles,
+  }));
 });
+
+async function ownedProfile(c: Context<AppEnv>, profileId: string | undefined): Promise<ProfileRecord | null> {
+  if (!profileId) return null;
+  return findProfileByIdForUser(c.env.DB, profileId, c.get('user').id);
+}
+
+routes.get('/user/profiles', authMiddleware, async (c) => {
+  return c.json(await profileCollection(c));
+});
+
+routes.post('/user/profiles', authMiddleware, async (c) => {
+  const body = await readJson<ProfileNameInput>(c);
+  const name = asString(body?.name);
+  if (!name) return jsonError(c, 400, 'name is required.');
+  if (!isValidProfileName(name)) return jsonError(c, 400, 'Game name must be 3-16 letters, numbers or underscores.');
+
+  const user = c.get('user');
+  if (await countProfilesByUserId(c.env.DB, user.id) >= MAX_PROFILES_PER_USER) {
+    return profileLimitReached(c);
+  }
+  if (await findProfileByName(c.env.DB, name)) return profileNameConflict(c);
+
+  const now = Date.now();
+  const profile: ProfileRecord = {
+    id: generateProfileId(),
+    user_id: user.id,
+    name,
+    skin_hash: null,
+    cape_hash: null,
+    skin_model: 'classic',
+    created_at: now,
+    updated_at: now,
+  };
+  try {
+    if (!await insertProfileBelowLimit(c.env.DB, profile, MAX_PROFILES_PER_USER)) {
+      return profileLimitReached(c);
+    }
+  } catch (error) {
+    if (isConstraintViolation(error)) return profileNameConflict(c);
+    throw error;
+  }
+  return c.json(await profilePayload(c, profile), 201);
+});
+
+async function renameProfile(c: Context<AppEnv>): Promise<Response> {
+  const profile = await ownedProfile(c, c.req.param('id'));
+  if (!profile) return profileNotFound(c);
+  const body = await readJson<ProfileNameInput>(c);
+  const name = asString(body?.name);
+  if (!name) return jsonError(c, 400, 'name is required.');
+  if (!isValidProfileName(name)) return jsonError(c, 400, 'Game name must be 3-16 letters, numbers or underscores.');
+
+  const existing = await findProfileByName(c.env.DB, name);
+  if (existing && existing.id !== profile.id) return profileNameConflict(c);
+  const updatedAt = Date.now();
+  try {
+    await updateProfileName(c.env.DB, profile.id, name, updatedAt);
+  } catch (error) {
+    if (isConstraintViolation(error)) return profileNameConflict(c);
+    throw error;
+  }
+  const nextProfile = { ...profile, name, updated_at: updatedAt };
+  if (c.get('user').default_profile_id === profile.id) c.set('profile', nextProfile);
+  return c.json(await profilePayload(c, nextProfile));
+}
+
+routes.patch('/user/profiles/:id', authMiddleware, renameProfile);
+routes.put('/user/profiles/:id', authMiddleware, renameProfile);
+
+routes.delete('/user/profiles/:id', authMiddleware, async (c) => {
+  const profile = await ownedProfile(c, c.req.param('id'));
+  if (!profile) return profileNotFound(c);
+  const user = c.get('user');
+  const profiles = await listProfilesByUserId(c.env.DB, user.id);
+  if (profiles.length <= 1) return lastProfileProtected(c);
+
+  const defaultId = user.default_profile_id ?? profiles[0]?.id;
+  if (defaultId === profile.id) {
+    const nextDefault = profiles.find((candidate) => candidate.id !== profile.id);
+    if (!nextDefault || !await setDefaultProfile(c.env.DB, user.id, nextDefault.id, Date.now())) {
+      return profileNotFound(c);
+    }
+    c.set('user', { ...user, default_profile_id: nextDefault.id, updated_at: Date.now() });
+    c.set('profile', nextDefault);
+  }
+
+  const deleted = await deleteProfile(c.env.DB, profile.id, user.id);
+  if (!deleted) return profileNotFound(c);
+  await removeIfUnreferenced(c, profile.skin_hash);
+  await removeIfUnreferenced(c, profile.cape_hash);
+  return c.body(null, 204);
+});
+
+async function selectDefaultProfile(c: Context<AppEnv>): Promise<Response> {
+  const profile = await ownedProfile(c, c.req.param('id'));
+  if (!profile) return profileNotFound(c);
+  const user = c.get('user');
+  const updatedAt = Date.now();
+  if (!await setDefaultProfile(c.env.DB, user.id, profile.id, updatedAt)) return profileNotFound(c);
+  const nextUser = { ...user, default_profile_id: profile.id, updated_at: updatedAt };
+  c.set('user', nextUser);
+  c.set('profile', profile);
+  return c.json({ user: serializeUser(nextUser, profile), ...(await profileCollection(c)) });
+}
+
+routes.put('/user/profiles/:id/default', authMiddleware, selectDefaultProfile);
+routes.post('/user/profiles/:id/default', authMiddleware, selectDefaultProfile);
 
 routes.put('/user/password', authMiddleware, async (c) => {
   const body = await readJson<PasswordInput>(c);

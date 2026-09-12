@@ -1033,6 +1033,118 @@ h3 {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
 }
+.profile-management {
+  margin-bottom: 20px;
+}
+.profile-management-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+.profile-management-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color var(--motion),
+    background var(--motion);
+}
+.profile-management-item.selected {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.profile-card-button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+.profile-card-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+.profile-card-avatar {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: 10px;
+  font-family: 'Press Start 2P', ui-monospace, monospace;
+  font-size: 0.56rem;
+}
+.profile-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.profile-card-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-card-copy small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.profile-card-button > svg {
+  margin-left: auto;
+  color: var(--accent);
+}
+.profile-management-id {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--muted-strong);
+  font:
+    0.68rem/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-management-actions,
+.profile-inline-form {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.profile-inline-form {
+  grid-column: 1 / -1;
+}
+.profile-inline-form input {
+  width: min(220px, 100%);
+  min-height: 38px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.profile-create-form {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.profile-create-form .field {
+  flex: 1;
+}
+.profile-limit-note {
+  margin: 18px 0 0;
+}
 .profile-summary-main,
 .profile-summary-meta {
   display: flex;
@@ -1851,6 +1963,17 @@ td select {
   .inline-form {
     display: grid;
     align-items: stretch;
+  }
+  .profile-create-form {
+    display: grid;
+    align-items: stretch;
+  }
+  .profile-create-form .button {
+    width: 100%;
+  }
+  .profile-management-actions,
+  .profile-inline-form {
+    justify-content: flex-start;
   }
   .inline-form .button {
     width: 100%;

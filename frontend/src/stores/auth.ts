@@ -1,16 +1,22 @@
 import { defineStore } from 'pinia';
 import {
   changePassword,
+  createProfile,
   clearCsrfToken,
   deleteAsset,
+  deleteProfile,
+  getProfiles,
   getUserProfile,
   login as loginWithCookies,
   logout as logoutWithCookies,
+  renameProfile,
   register,
   setCsrfToken,
+  setDefaultProfile,
   uploadAsset,
   type ApiProfile,
   type ApiUser,
+  type ProfileCollection,
 } from '../api';
 
 const SESSION_KEY = 'skinless.session';
@@ -18,6 +24,8 @@ const SESSION_KEY = 'skinless.session';
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     user: null as ApiUser | null,
+    profiles: [] as ApiProfile[],
+    defaultProfileId: null as string | null,
     initialized: false,
     loading: false,
   }),
@@ -25,10 +33,27 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: (state) => Boolean(state.user),
     isAdmin: (state) => state.user?.role === 'admin',
     profile: (state): ApiProfile | null => state.user?.profile ?? null,
+    availableProfiles: (state): ApiProfile[] =>
+      state.profiles.length > 0 && state.user
+        ? state.profiles
+        : state.user?.profile
+          ? [state.user.profile]
+          : [],
   },
   actions: {
+    syncProfileState(response: { user: ApiUser } & Partial<ProfileCollection>) {
+      this.user = response.user;
+      this.profiles = response.profiles?.length
+        ? response.profiles
+        : response.user.profile
+          ? [response.user.profile]
+          : [];
+      this.defaultProfileId = response.defaultProfileId ?? response.user.profile?.id ?? null;
+    },
     clearSession() {
       this.user = null;
+      this.profiles = [];
+      this.defaultProfileId = null;
       clearCsrfToken();
       localStorage.removeItem(SESSION_KEY);
     },
@@ -37,7 +62,7 @@ export const useAuthStore = defineStore('auth', {
       this.initialized = true;
       localStorage.removeItem(SESSION_KEY);
       try {
-        this.user = (await getUserProfile()).user;
+        this.syncProfileState(await getUserProfile());
       } catch {
         this.clearSession();
       }
@@ -47,7 +72,7 @@ export const useAuthStore = defineStore('auth', {
       try {
         const session = await loginWithCookies(email, password, turnstileToken);
         setCsrfToken(session.csrfToken);
-        this.user = session.user;
+        this.syncProfileState(session);
       } catch (cause) {
         this.clearSession();
         throw cause;
@@ -84,6 +109,39 @@ export const useAuthStore = defineStore('auth', {
       await deleteAsset(asset);
       if (asset === 'skin') this.user.profile.skinHash = null;
       else this.user.profile.capeHash = null;
+    },
+    async loadProfiles() {
+      const collection = await getProfiles();
+      this.applyProfileCollection(collection);
+      return collection;
+    },
+    applyProfileCollection(collection: ProfileCollection) {
+      this.profiles = collection.profiles;
+      this.defaultProfileId = collection.defaultProfileId;
+    },
+    async createProfile(name: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      const result = await createProfile(name);
+      this.applyProfileCollection(result);
+      return result.profile;
+    },
+    async renameProfile(profileId: string, name: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      const result = await renameProfile(profileId, name);
+      this.applyProfileCollection(result);
+      if (this.user.profile.id === profileId) this.user.profile = result.profile;
+      return result.profile;
+    },
+    async deleteProfile(profileId: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      await deleteProfile(profileId);
+      this.syncProfileState(await getUserProfile());
+    },
+    async setDefaultProfile(profileId: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      const result = await setDefaultProfile(profileId);
+      this.syncProfileState(result);
+      return result.user.profile;
     },
   },
 });

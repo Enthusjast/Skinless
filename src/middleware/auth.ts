@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv, TokenRecord } from '../types';
 import {
-  findProfileByUserId,
+  findDefaultProfileByUserId,
   findTokenContext,
   findUserById,
   findWebSessionById,
@@ -23,7 +23,7 @@ export const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
     if (!row) return unauthorized(c, 'The access token is invalid or expired.');
 
     const user = await findUserById(c.env.DB, row.user_id);
-    const profile = await findProfileByUserId(c.env.DB, row.user_id);
+    const profile = await findDefaultProfileByUserId(c.env.DB, row.user_id);
     if (!user || !profile) return unauthorized(c, 'The access token is invalid or expired.');
 
     const tokenRecord: TokenRecord = {
@@ -66,7 +66,7 @@ export const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
   }
 
   const user = await findUserById(c.env.DB, session.user_id);
-  const profile = await findProfileByUserId(c.env.DB, session.user_id);
+  const profile = await findDefaultProfileByUserId(c.env.DB, session.user_id);
   if (!user || !profile) return unauthorized(c, 'The web session is invalid or expired.');
 
   const lastUsedAt = Date.now();

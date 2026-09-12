@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { Copy, KeyRound, ShieldCheck } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError } from '../api';
 import UiCard from '../components/common/UiCard.vue';
 import SessionManagement from '../components/SessionManagement.vue';
+import ProfileManagement from '../components/ProfileManagement.vue';
 import SkinPreview from '../components/SkinPreview.vue';
 import SkinUploader from '../components/SkinUploader.vue';
 import { useAuthStore } from '../stores/auth';
@@ -20,6 +21,16 @@ const selectedModel = ref<'classic' | 'slim'>(auth.profile?.skinModel ?? 'classi
 const copied = ref(false);
 const temporarySkinPreview = ref<string | null>(null);
 const temporaryCapePreview = ref<string | null>(null);
+
+watch(
+  () => profile.value?.id,
+  () => {
+    selectedModel.value = profile.value?.skinModel ?? 'classic';
+    temporarySkinPreview.value = null;
+    temporaryCapePreview.value = null;
+    copied.value = false;
+  },
+);
 
 function setAssetPreview(asset: 'skin' | 'cape', url: string | null) {
   if (asset === 'skin') temporarySkinPreview.value = url;
@@ -56,6 +67,7 @@ async function changePassword() {
 </script>
 
 <template>
+  <ProfileManagement />
   <section class="profile-summary-card">
     <div class="profile-summary-main">
       <span class="profile-avatar-large">{{ profile?.name?.slice(0, 1).toUpperCase() }}</span>

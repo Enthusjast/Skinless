@@ -138,4 +138,37 @@ describe('cookie-backed auth store', () => {
       '/api/user/profile',
     ]);
   });
+
+  it('switches the default profile and keeps the active user profile in sync', async () => {
+    const secondProfile = {
+      id: 'profile-2',
+      name: 'SecondPlayer',
+      skinHash: 'second-skin',
+      capeHash: null,
+      skinModel: 'slim' as const,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          user: { ...user, profile: secondProfile },
+          profiles: [user.profile, secondProfile],
+          defaultProfileId: secondProfile.id,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const auth = useAuthStore();
+    auth.user = user;
+    auth.profiles = [user.profile, secondProfile];
+    auth.defaultProfileId = user.profile.id;
+    await auth.setDefaultProfile(secondProfile.id);
+
+    expect(auth.profile).toEqual(secondProfile);
+    expect(auth.defaultProfileId).toBe(secondProfile.id);
+    expect(auth.profiles).toEqual([user.profile, secondProfile]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/user/profiles/profile-2/default');
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('X-CSRF-Token')).toBeNull();
+  });
 });

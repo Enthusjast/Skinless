@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../stores/auth';
 import DashboardView from './DashboardView.vue';
 
@@ -38,6 +38,11 @@ const SkinPreviewStub = defineComponent({
     '<div class="preview-stub" :data-skin-hash="skinHash || \'\'" :data-skin-preview="skinPreviewUrl || \'\'" :data-cape-preview="capePreviewUrl || \'\'" />',
 });
 
+const ProfileManagementStub = defineComponent({
+  name: 'ProfileManagement',
+  template: '<div class="profile-management-stub" />',
+});
+
 beforeEach(() => {
   setActivePinia(createPinia());
   const auth = useAuthStore();
@@ -55,6 +60,12 @@ beforeEach(() => {
       skinModel: 'classic',
     },
   };
+  auth.profiles = [auth.user.profile];
+  auth.defaultProfileId = auth.user.profile.id;
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('DashboardView preview wiring', () => {
@@ -65,6 +76,7 @@ describe('DashboardView preview wiring', () => {
           UiCard: UiCardStub,
           SkinUploader: SkinUploaderStub,
           SkinPreview: SkinPreviewStub,
+          ProfileManagement: ProfileManagementStub,
           SessionManagement: true,
         },
       },
@@ -83,5 +95,47 @@ describe('DashboardView preview wiring', () => {
 
     expect(preview.attributes('data-skin-preview')).toBe('');
     expect(preview.attributes('data-skin-hash')).toBe('saved-skin');
+  });
+
+  it('refreshes the active upload and preview targets after switching the default profile', async () => {
+    const secondProfile = {
+      id: 'profile-2',
+      name: 'SecondPlayer',
+      skinHash: 'second-skin',
+      capeHash: 'second-cape',
+      skinModel: 'slim' as const,
+    };
+    const auth = useAuthStore();
+    auth.profiles = [auth.user!.profile, secondProfile];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          user: { ...auth.user, profile: secondProfile },
+          profiles: [auth.user!.profile, secondProfile],
+          defaultProfileId: secondProfile.id,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          UiCard: UiCardStub,
+          SkinUploader: SkinUploaderStub,
+          SkinPreview: SkinPreviewStub,
+          ProfileManagement: ProfileManagementStub,
+          SessionManagement: true,
+        },
+      },
+    });
+
+    await auth.setDefaultProfile(secondProfile.id);
+    await flushPromises();
+
+    const uploaders = wrapper.findAllComponents(SkinUploaderStub);
+    expect(uploaders[0]?.props('currentHash')).toBe('second-skin');
+    expect(wrapper.get('.preview-stub').attributes('data-skin-hash')).toBe('second-skin');
+    expect(wrapper.get('.preview-stub').attributes('data-cape-preview')).toBe('');
   });
 });

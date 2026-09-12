@@ -4,7 +4,8 @@ import {
   deleteToken,
   deleteUserTokens,
   findProfileById,
-  findProfileByUserId,
+  findDefaultProfileByUserId,
+  listProfilesByUserId,
   findUserByEmail,
   findTokenContext,
   insertToken,
@@ -61,15 +62,16 @@ function profileResponse(profile: ProfileRecord): { id: string; name: string } {
 
 function tokenResponse(
   token: TokenRecord,
-  profile: ProfileRecord,
+  selectedProfile: ProfileRecord,
+  profiles: ProfileRecord[],
   user: UserRecord,
   requestUser: boolean,
 ): Record<string, unknown> {
   const response: Record<string, unknown> = {
     accessToken: token.access_token,
     clientToken: token.client_token,
-    availableProfiles: [profileResponse(profile)],
-    selectedProfile: profileResponse(profile),
+    availableProfiles: profiles.map(profileResponse),
+    selectedProfile: profileResponse(selectedProfile),
   };
   if (requestUser) response.user = { id: user.id, properties: [] };
   return response;
@@ -123,8 +125,9 @@ routes.post('/authserver/authenticate', async (c) => {
     return invalidCredentials(c);
   }
 
-  const profile = await findProfileByUserId(c.env.DB, user.id);
+  const profile = await findDefaultProfileByUserId(c.env.DB, user.id);
   if (!profile) return yggError(c, 500, 'The account profile is unavailable.', 'InternalServerError');
+  const profiles = await listProfilesByUserId(c.env.DB, user.id);
 
   const now = Date.now();
   const token: TokenRecord = {
@@ -137,7 +140,7 @@ routes.post('/authserver/authenticate', async (c) => {
   };
   await insertToken(c.env.DB, token);
   await clearLoginFailuresDistributed(c.env, clientKey);
-  return c.json(tokenResponse(token, profile, user, body?.requestUser === true));
+  return c.json(tokenResponse(token, profile, profiles.length > 0 ? profiles : [profile], user, body?.requestUser === true));
 });
 
 routes.post('/authserver/refresh', async (c) => {
@@ -174,7 +177,8 @@ routes.post('/authserver/refresh', async (c) => {
     created_at: result.context.user_created_at,
     updated_at: result.context.user_updated_at,
   };
-  return c.json(tokenResponse(token, profile, user, body.requestUser === true));
+  const profiles = await listProfilesByUserId(c.env.DB, result.context.user_id);
+  return c.json(tokenResponse(token, profile, profiles.length > 0 ? profiles : [profile], user, body.requestUser === true));
 });
 
 routes.post('/authserver/validate', async (c) => {
