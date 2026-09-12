@@ -311,6 +311,7 @@ async function uploadAsset(
   }
 
   if (!reused) {
+    await cancelTextureCleanup(c.env.DB, hash);
     try {
       const inserted = await insertTextureBelowLimit(c.env.DB, texture, MAX_TEXTURES_PER_USER);
       if (!inserted) {
@@ -361,6 +362,13 @@ async function uploadAsset(
     await cancelTextureCleanup(c.env.DB, hash);
     if (previousHash && previousHash !== hash) await scheduleIfUnreferenced(c, previousHash);
   }
+
+  await c.env.BUCKET.put(key, normalized.bytes, {
+    httpMetadata: {
+      contentType: 'image/png',
+      cacheControl: 'public, max-age=31536000, immutable',
+    },
+  });
 
   const quota = await wardrobeQuota(c);
   return c.json({
@@ -459,6 +467,7 @@ async function applyTexture(c: Context<AppEnv>): Promise<Response> {
   if (!isTextureModelCompatible(texture, profile)) return textureModelMismatch(c);
 
   const previousHash = assetHash(profile, texture.texture_type);
+  await cancelTextureCleanup(c.env.DB, texture.hash);
   const applied = await updateProfileAssetIfTextureExists(
     c.env.DB,
     profile.id,
@@ -468,7 +477,10 @@ async function applyTexture(c: Context<AppEnv>): Promise<Response> {
     texture.hash,
     texture.model ?? profile.skin_model,
   );
-  if (!applied) return textureNotFound(c);
+  if (!applied) {
+    await scheduleIfUnreferenced(c, texture.hash);
+    return textureNotFound(c);
+  }
   const nextProfile = texture.texture_type === 'skin'
     ? { ...profile, skin_hash: texture.hash, skin_model: texture.model ?? profile.skin_model }
     : { ...profile, cape_hash: texture.hash };

@@ -49,6 +49,14 @@ class CleanupDatabase {
     if (sql.startsWith('SELECT COUNT(*) AS count FROM texture_wardrobe')) {
       return { count: this.wardrobeReferences.get(String(values[0])) ?? 0 };
     }
+    if (sql.startsWith('DELETE FROM texture_cleanup WHERE hash = ? AND scheduled_at <= ?')) {
+      const hash = String(values[0]);
+      const row = this.cleanups.get(hash);
+      const referenced = (this.profileReferences.get(hash) ?? 0) + (this.wardrobeReferences.get(hash) ?? 0) > 0;
+      if (!row || row.scheduled_at > Number(values[1]) || referenced) return null;
+      this.cleanups.delete(hash);
+      return { ...row };
+    }
     return null;
   }
 
@@ -66,6 +74,20 @@ class CleanupDatabase {
   }
 
   run(sql: string, values: unknown[]): number {
+    if (sql.startsWith('INSERT INTO texture_cleanup') && sql.includes('SELECT ?, ?, ?, ?, ?')) {
+      const [hashValue, objectKeyValue, scheduledAtValue, attemptsValue, errorValue] = values;
+      const hash = String(hashValue);
+      const referenced = (this.profileReferences.get(hash) ?? 0) + (this.wardrobeReferences.get(hash) ?? 0) > 0;
+      if (referenced) return 0;
+      this.cleanups.set(hash, {
+        hash,
+        object_key: String(objectKeyValue),
+        scheduled_at: Number(scheduledAtValue),
+        attempts: Number(attemptsValue),
+        last_error: String(errorValue),
+      });
+      return 1;
+    }
     if (sql.startsWith('INSERT INTO texture_cleanup')) {
       const [hash, objectKey, scheduledAt] = values.map(String);
       if (this.cleanups.has(hash)) return 0;
@@ -77,6 +99,11 @@ class CleanupDatabase {
         last_error: null,
       });
       return 1;
+    }
+    if (sql.startsWith('DELETE FROM texture_cleanup WHERE hash = ? AND (EXISTS')) {
+      const hash = String(values[0]);
+      const referenced = (this.profileReferences.get(hash) ?? 0) + (this.wardrobeReferences.get(hash) ?? 0) > 0;
+      return referenced && this.cleanups.delete(hash) ? 1 : 0;
     }
     if (sql.startsWith('DELETE FROM texture_cleanup WHERE hash = ?')) {
       return this.cleanups.delete(String(values[0])) ? 1 : 0;
@@ -94,11 +121,30 @@ class CleanupDatabase {
 
 class CleanupBucket {
   public readonly deleted: string[] = [];
+  public readonly files = new Map<string, Uint8Array>();
+  public getCalls = 0;
   public fail = false;
+  public onDelete: ((key: string) => void) | undefined;
+
+  async get(key: string): Promise<R2ObjectBody | null> {
+    this.getCalls += 1;
+    const bytes = this.files.get(key);
+    if (!bytes) return null;
+    return {
+      arrayBuffer: async () => bytes.slice().buffer,
+    } as R2ObjectBody;
+  }
+
+  async put(key: string, body: BodyInit): Promise<R2Object> {
+    this.files.set(key, new Uint8Array(await new Response(body).arrayBuffer()));
+    return { key } as R2Object;
+  }
 
   async delete(key: string): Promise<void> {
     if (this.fail) throw new Error('R2 unavailable');
     this.deleted.push(key);
+    this.files.delete(key);
+    this.onDelete?.(key);
   }
 }
 
@@ -192,5 +238,42 @@ describe('deferred texture cleanup', () => {
 
     expect(bucket.deleted).toEqual([]);
     expect(db.cleanups.has('hash-f')).toBe(false);
+  });
+
+  it('restores cached bytes when a reference appears during deletion', async () => {
+    const db = database();
+    const bucket = new CleanupBucket();
+    const now = 7_000_000;
+    const originalBytes = Uint8Array.from([1, 2, 3, 4]);
+    bucket.files.set('hash-race.png', originalBytes);
+    bucket.onDelete = () => db.profileReferences.set('hash-race', 1);
+    await scheduleTextureCleanup(db as unknown as D1Database, 'hash-race', now);
+
+    const stats = await processTextureCleanup(
+      db as unknown as D1Database,
+      bucket as unknown as R2Bucket,
+      now + TEXTURE_CLEANUP_DELAY_MS,
+    );
+
+    expect(stats).toMatchObject({ processed: 1, deleted: 0, cancelled: 1, failed: 0 });
+    expect(bucket.files.get('hash-race.png')).toEqual(originalBytes);
+    expect(db.cleanups.has('hash-race')).toBe(false);
+  });
+
+  it('treats an already-missing object as an idempotent deletion', async () => {
+    const db = database();
+    const bucket = new CleanupBucket();
+    const now = 8_000_000;
+    await scheduleTextureCleanup(db as unknown as D1Database, 'hash-missing', now);
+
+    const stats = await processTextureCleanup(
+      db as unknown as D1Database,
+      bucket as unknown as R2Bucket,
+      now + TEXTURE_CLEANUP_DELAY_MS,
+    );
+
+    expect(bucket.getCalls).toBe(1);
+    expect(stats).toMatchObject({ processed: 1, deleted: 1, cancelled: 0, failed: 0 });
+    expect(db.cleanups.has('hash-missing')).toBe(false);
   });
 });

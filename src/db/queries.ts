@@ -624,6 +624,105 @@ export async function updateUserRole(db: D1Database, userId: string, role: UserR
   await db.prepare('UPDATE users SET role = ?, updated_at = ? WHERE id = ?').bind(role, updatedAt, userId).run();
 }
 
+export interface TextureCleanupRow {
+  hash: string;
+  object_key: string;
+  scheduled_at: number;
+  attempts: number;
+  last_error: string | null;
+}
+
+export async function claimTextureCleanup(
+  db: D1Database,
+  hash: string,
+  now: number,
+): Promise<TextureCleanupRow | null> {
+  return db
+    .prepare(
+      `DELETE FROM texture_cleanup
+       WHERE hash = ?
+         AND scheduled_at <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM profiles
+           WHERE skin_hash = ? OR cape_hash = ?
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM texture_wardrobe
+           WHERE hash = ?
+         )
+       RETURNING hash, object_key, scheduled_at, attempts, last_error`,
+    )
+    .bind(hash, now, hash, hash, hash)
+    .first<TextureCleanupRow>();
+}
+
+export async function cancelTextureCleanupIfReferenced(db: D1Database, hash: string): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM texture_cleanup
+       WHERE hash = ?
+         AND (
+           EXISTS (
+             SELECT 1 FROM profiles
+             WHERE skin_hash = ? OR cape_hash = ?
+           )
+           OR EXISTS (
+             SELECT 1 FROM texture_wardrobe
+             WHERE hash = ?
+           )
+         )`,
+    )
+    .bind(hash, hash, hash, hash)
+    .run();
+}
+
+export async function retryTextureCleanup(
+  db: D1Database,
+  cleanup: TextureCleanupRow,
+  error: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO texture_cleanup (hash, object_key, scheduled_at, attempts, last_error)
+       SELECT ?, ?, ?, ?, ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM profiles
+         WHERE skin_hash = ? OR cape_hash = ?
+       )
+         AND NOT EXISTS (
+           SELECT 1 FROM texture_wardrobe
+           WHERE hash = ?
+         )
+       ON CONFLICT (hash) DO UPDATE SET
+         object_key = excluded.object_key,
+         scheduled_at = excluded.scheduled_at,
+         attempts = excluded.attempts,
+         last_error = excluded.last_error
+       WHERE NOT EXISTS (
+         SELECT 1 FROM profiles
+         WHERE skin_hash = ? OR cape_hash = ?
+       )
+         AND NOT EXISTS (
+           SELECT 1 FROM texture_wardrobe
+           WHERE hash = ?
+         )`,
+    )
+    .bind(
+      cleanup.hash,
+      cleanup.object_key,
+      cleanup.scheduled_at,
+      cleanup.attempts + 1,
+      error,
+      cleanup.hash,
+      cleanup.hash,
+      cleanup.hash,
+      cleanup.hash,
+      cleanup.hash,
+      cleanup.hash,
+    )
+    .run();
+}
+
 export async function countAssetReferences(db: D1Database, hash: string): Promise<number> {
   const [profileRow, wardrobeRow] = await Promise.all([
     db

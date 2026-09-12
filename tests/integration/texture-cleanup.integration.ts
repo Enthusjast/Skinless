@@ -118,4 +118,23 @@ describe('deferred texture cleanup on Cloudflare runtime', () => {
       .first();
     expect(completed).toBeNull();
   });
+
+  it('removes a queued row when its R2 object is already missing', async () => {
+    const hash = crypto.randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64);
+    await env.DB.prepare(
+      `INSERT INTO texture_cleanup (hash, object_key, scheduled_at, attempts, last_error)
+       VALUES (?, ?, ?, 0, NULL)`,
+    ).bind(hash, `${hash}.png`, Date.now() - 1).run();
+
+    const executionContext = createExecutionContext();
+    await worker.scheduled!(
+      createScheduledController({ cron: '0 3 * * *', scheduledTime: Date.now() }),
+      env,
+      executionContext,
+    );
+    await waitOnExecutionContext(executionContext);
+
+    expect(await env.BUCKET.head(`${hash}.png`)).toBeNull();
+    expect(await env.DB.prepare('SELECT hash FROM texture_cleanup WHERE hash = ?').bind(hash).first()).toBeNull();
+  });
 });
