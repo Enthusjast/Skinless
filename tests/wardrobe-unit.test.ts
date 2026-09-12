@@ -23,7 +23,9 @@ describe('private texture wardrobe rules', () => {
   });
 
   it('clamps pagination without allowing negative offsets or oversized pages', () => {
+    expect(parseWardrobePage({})).toEqual({ limit: 20, offset: 0 });
     expect(parseWardrobePage({ limit: '2', offset: '4' })).toEqual({ limit: 2, offset: 4 });
+    expect(parseWardrobePage({ limit: '0', offset: '0' })).toEqual({ limit: 1, offset: 0 });
     expect(parseWardrobePage({ limit: '999', offset: '-4' })).toEqual({ limit: 100, offset: 0 });
     expect(parseWardrobePage({ limit: 'bad', offset: 'bad' })).toEqual({ limit: 20, offset: 0 });
   });

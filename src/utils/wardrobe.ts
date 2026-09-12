@@ -14,9 +14,9 @@ export interface TextureWardrobeRecord {
   texture_type: TextureType;
   name: string;
   model: SkinModel | null;
-  width: number;
-  height: number;
-  size: number;
+  width: number | null;
+  height: number | null;
+  size: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -46,11 +46,13 @@ export function textureName(value: unknown, type: TextureType): string | null {
 }
 
 export function parseWardrobePage(query: { limit?: string; offset?: string }): WardrobePage {
-  const rawLimit = Number(query.limit ?? '');
+  const rawLimit = query.limit === undefined ? null : Number(query.limit);
   const rawOffset = Number(query.offset ?? '');
-  const limit = Number.isInteger(rawLimit)
-    ? Math.min(Math.max(rawLimit, 1), MAX_WARDROBE_PAGE_SIZE)
-    : DEFAULT_WARDROBE_PAGE_SIZE;
+  const limit = rawLimit === null
+    ? DEFAULT_WARDROBE_PAGE_SIZE
+    : Number.isInteger(rawLimit)
+      ? Math.min(Math.max(rawLimit, 1), MAX_WARDROBE_PAGE_SIZE)
+      : DEFAULT_WARDROBE_PAGE_SIZE;
   const offset = Number.isInteger(rawOffset) ? Math.max(rawOffset, 0) : 0;
   return { limit, offset };
 }

@@ -25,9 +25,9 @@ export interface WardrobeTexture {
   type: WardrobeTextureType;
   name: string;
   model: WardrobeTextureModel;
-  width: number;
-  height: number;
-  size: number;
+  width: number | null;
+  height: number | null;
+  size: number | null;
   createdAt: number;
   updatedAt: number;
   previewUrl: string;

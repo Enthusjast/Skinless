@@ -422,6 +422,38 @@ export async function updateProfileAsset(
   await db.prepare('UPDATE profiles SET cape_hash = ? WHERE id = ?').bind(hash, profileId).run();
 }
 
+export async function updateProfileAssetIfTextureExists(
+  db: D1Database,
+  profileId: string,
+  userId: string,
+  textureId: string,
+  asset: TextureType,
+  hash: string,
+  model?: SkinModel,
+): Promise<boolean> {
+  const textureExists = `EXISTS (
+    SELECT 1 FROM texture_wardrobe
+    WHERE id = ? AND user_id = ? AND hash = ? AND texture_type = ?
+  )`;
+  const statement = asset === 'skin'
+    ? db
+      .prepare(
+        `UPDATE profiles
+         SET skin_hash = ?, skin_model = ?
+         WHERE id = ? AND user_id = ? AND ${textureExists}`,
+      )
+      .bind(hash, model ?? 'classic', profileId, userId, textureId, userId, hash, asset)
+    : db
+      .prepare(
+        `UPDATE profiles
+         SET cape_hash = ?
+         WHERE id = ? AND user_id = ? AND ${textureExists}`,
+      )
+      .bind(hash, profileId, userId, textureId, userId, hash, asset);
+  const result = await statement.run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
 export async function findTextureByIdForUser(
   db: D1Database,
   textureId: string,
@@ -545,14 +577,21 @@ export async function updateTextureName(
   return (result.meta?.changes ?? 0) > 0;
 }
 
-export async function deleteTextureById(
+export async function deleteTextureIfUnreferenced(
   db: D1Database,
-  textureId: string,
-  userId: string,
+  texture: Pick<TextureWardrobeRecord, 'id' | 'user_id' | 'hash' | 'texture_type'>,
 ): Promise<boolean> {
+  const column = texture.texture_type === 'skin' ? 'skin_hash' : 'cape_hash';
   const result = await db
-    .prepare('DELETE FROM texture_wardrobe WHERE id = ? AND user_id = ?')
-    .bind(textureId, userId)
+    .prepare(
+      `DELETE FROM texture_wardrobe
+       WHERE id = ? AND user_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM profiles
+           WHERE user_id = ? AND ${column} = ?
+         )`,
+    )
+    .bind(texture.id, texture.user_id, texture.user_id, texture.hash)
     .run();
   return (result.meta?.changes ?? 0) > 0;
 }

@@ -6,7 +6,7 @@ import {
   countTexturesByUserId,
   countTexturesByUserIdAndType,
   countProfilesByUserId,
-  deleteTextureById,
+  deleteTextureIfUnreferenced,
   deleteProfile,
   deleteUserTokens,
   findDefaultProfileByUserId,
@@ -34,6 +34,7 @@ import {
   updatePassword,
   updateProfileName,
   updateProfileAsset,
+  updateProfileAssetIfTextureExists,
   updateTextureName,
   updateUserRole,
   MAX_PROFILES_PER_USER,
@@ -341,7 +342,16 @@ async function uploadAsset(
   let nextProfile = profile;
   if (applyToDefaultProfile) {
     const previousHash = assetHash(profile, asset);
-    await updateProfileAsset(c.env.DB, profile.id, asset, hash, texture.model ?? profile.skin_model);
+    const applied = await updateProfileAssetIfTextureExists(
+      c.env.DB,
+      profile.id,
+      userId,
+      texture.id,
+      asset,
+      hash,
+      texture.model ?? profile.skin_model,
+    );
+    if (!applied) return textureNotFound(c);
     nextProfile = asset === 'skin'
       ? { ...profile, skin_hash: hash, skin_model: texture.model ?? profile.skin_model }
       : { ...profile, cape_hash: hash };
@@ -417,16 +427,20 @@ async function renameTexture(c: Context<AppEnv>): Promise<Response> {
 async function deleteTexture(c: Context<AppEnv>): Promise<Response> {
   const texture = await findTextureByIdForUser(c.env.DB, c.req.param('id') ?? '', c.get('user').id);
   if (!texture) return textureNotFound(c);
-  const profiles = await listTextureProfileReferences(c.env.DB, texture);
-  if (profiles.length > 0) {
-    return c.json({
-      error: 'Conflict',
-      errorMessage: 'The texture is still applied to one or more profiles.',
-      errorCode: 'texture_in_use',
-      profiles: profiles.map(({ id, name }) => ({ id, name })),
-    }, 409);
+  if (!await deleteTextureIfUnreferenced(c.env.DB, texture)) {
+    const currentTexture = await findTextureByIdForUser(c.env.DB, texture.id, c.get('user').id);
+    if (!currentTexture) return textureNotFound(c);
+    const profiles = await listTextureProfileReferences(c.env.DB, currentTexture);
+    if (profiles.length > 0) {
+      return c.json({
+        error: 'Conflict',
+        errorMessage: 'The texture is still applied to one or more profiles.',
+        errorCode: 'texture_in_use',
+        profiles: profiles.map(({ id, name }) => ({ id, name })),
+      }, 409);
+    }
+    return textureNotFound(c);
   }
-  if (!await deleteTextureById(c.env.DB, texture.id, c.get('user').id)) return textureNotFound(c);
   await removeIfUnreferenced(c, texture.hash);
   return c.body(null, 204);
 }
@@ -441,7 +455,16 @@ async function applyTexture(c: Context<AppEnv>): Promise<Response> {
   if (!isTextureModelCompatible(texture, profile)) return textureModelMismatch(c);
 
   const previousHash = assetHash(profile, texture.texture_type);
-  await updateProfileAsset(c.env.DB, profile.id, texture.texture_type, texture.hash, texture.model ?? profile.skin_model);
+  const applied = await updateProfileAssetIfTextureExists(
+    c.env.DB,
+    profile.id,
+    c.get('user').id,
+    texture.id,
+    texture.texture_type,
+    texture.hash,
+    texture.model ?? profile.skin_model,
+  );
+  if (!applied) return textureNotFound(c);
   const nextProfile = texture.texture_type === 'skin'
     ? { ...profile, skin_hash: texture.hash, skin_model: texture.model ?? profile.skin_model }
     : { ...profile, cape_hash: texture.hash };

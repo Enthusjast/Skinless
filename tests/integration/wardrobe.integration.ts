@@ -138,18 +138,18 @@ describe('private texture wardrobe on real D1', () => {
         hash: 'shared-cape',
         texture_type: 'cape',
         model: null,
-        width: 64,
-        height: 32,
-        size: 0,
+        width: null,
+        height: null,
+        size: null,
       },
       {
         user_id: userId,
         hash: 'shared-skin',
         texture_type: 'skin',
         model: 'slim',
-        width: 64,
-        height: 64,
-        size: 0,
+        width: null,
+        height: null,
+        size: null,
       },
     ]);
   });
@@ -218,7 +218,12 @@ describe('private texture wardrobe on real D1', () => {
       body: form,
     });
     expect(upload.status).toBe(201);
-    await expect(upload.json()).resolves.toMatchObject({
+    const uploadBody = await upload.json() as {
+      hash: string;
+      profile: { id: string; skinHash: string; skinModel: string };
+      texture: { type: string; model: string; width: number; height: number; size: number };
+    };
+    expect(uploadBody).toMatchObject({
       hash: SKIN_HASH,
       profile: { id: client.profileId, skinHash: SKIN_HASH, skinModel: 'slim' },
       texture: { type: 'skin', model: 'slim' },
@@ -236,8 +241,9 @@ describe('private texture wardrobe on real D1', () => {
       hash: SKIN_HASH,
       texture_type: 'skin',
       name: 'Skin',
-      width: 64,
-      height: 64,
+      width: uploadBody.texture.width,
+      height: uploadBody.texture.height,
+      size: uploadBody.texture.size,
     });
 
     const duplicate = await authenticatedRequest('/api/user/skin', client.token, {
@@ -246,6 +252,40 @@ describe('private texture wardrobe on real D1', () => {
     });
     expect(duplicate.status).toBe(200);
     await expect(duplicate.json()).resolves.toMatchObject({ reused: true, quota: { used: 1, limit: 50 } });
+  });
+
+  it('keeps concurrent apply and delete from leaving a profile pointing at a deleted record', async () => {
+    const client = await createClient(`race${crypto.randomUUID().slice(0, 6)}`);
+    const upload = await authenticatedRequest('/api/user/wardrobe', client.token, {
+      method: 'POST',
+      body: uploadForm('skin', 'Race skin', 'classic'),
+    });
+    expect(upload.status).toBe(201);
+    const body = await upload.json() as { texture: { id: string; hash: string } };
+
+    const [deleteResponse, applyResponse] = await Promise.all([
+      authenticatedRequest(`/api/user/wardrobe/${body.texture.id}`, client.token, { method: 'DELETE' }),
+      authenticatedRequest(`/api/user/wardrobe/${body.texture.id}/apply`, client.token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId: client.profileId }),
+      }),
+    ]);
+    expect([204, 409]).toContain(deleteResponse.status);
+    expect([200, 404]).toContain(applyResponse.status);
+
+    const [textureRow, profileRow] = await Promise.all([
+      env.DB.prepare('SELECT id FROM texture_wardrobe WHERE id = ?').bind(body.texture.id).first(),
+      env.DB.prepare('SELECT skin_hash FROM profiles WHERE id = ?').bind(client.profileId).first<{ skin_hash: string | null }>(),
+    ]);
+    expect(profileRow?.skin_hash === body.texture.hash).toBe(textureRow !== null);
+
+    if (deleteResponse.status === 409) {
+      await expect(deleteResponse.json()).resolves.toMatchObject({
+        errorCode: 'texture_in_use',
+        profiles: [{ id: client.profileId }],
+      });
+    }
   });
 
   it('rejects a new upload at fifty records but still reuses an existing hash', async () => {

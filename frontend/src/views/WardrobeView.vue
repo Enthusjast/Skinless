@@ -153,9 +153,16 @@ async function removeTexture(texture: WardrobeTexture) {
   error.value = '';
   try {
     await deleteWardrobeTexture(texture.id);
-    textures.value = textures.value.filter((candidate) => candidate.id !== texture.id);
-    total.value = Math.max(0, total.value - 1);
+    const nextTotal = Math.max(0, total.value - 1);
+    const nextOffset = nextTotal > 0 ? Math.floor((nextTotal - 1) / PAGE_SIZE) * PAGE_SIZE : 0;
+    total.value = nextTotal;
     quota.value = { ...quota.value, used: Math.max(0, quota.value.used - 1) };
+    if (offset.value > nextOffset) {
+      offset.value = nextOffset;
+      await loadWardrobe();
+    } else {
+      textures.value = textures.value.filter((candidate) => candidate.id !== texture.id);
+    }
   } catch (cause) {
     error.value = formatApiError(cause, '删除纹理失败。');
   } finally {
@@ -287,6 +294,7 @@ onMounted(() => void loadWardrobe());
       <button
         class="button button-primary button-small"
         type="button"
+        data-action="upload-texture"
         :disabled="uploadBusy || !uploadFile || !uploadName.trim()"
         @click="uploadTexture"
       >
@@ -363,7 +371,11 @@ onMounted(() => void loadWardrobe());
             <div>
               <h3>{{ texture.name }}</h3>
               <p>
-                {{ texture.width }} × {{ texture.height }} ·
+                <template v-if="texture.width !== null && texture.height !== null">
+                  {{ texture.width }} × {{ texture.height }}
+                </template>
+                <template v-else>尺寸未知</template>
+                ·
                 {{ texture.model ? texture.model : '通用' }}
               </p>
             </div>
@@ -392,6 +404,7 @@ onMounted(() => void loadWardrobe());
             <button
               class="text-button danger"
               type="button"
+              data-action="delete-texture"
               :disabled="busyId === texture.id"
               @click="removeTexture(texture)"
             >
@@ -411,6 +424,7 @@ onMounted(() => void loadWardrobe());
     <button
       class="button button-ghost button-small"
       type="button"
+      data-action="previous-page"
       :disabled="offset === 0 || loading"
       @click="previousPage"
     >
@@ -420,6 +434,7 @@ onMounted(() => void loadWardrobe());
     <button
       class="button button-ghost button-small"
       type="button"
+      data-action="next-page"
       :disabled="!hasMore || loading"
       @click="nextPage"
     >

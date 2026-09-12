@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/index';
 import { clearLoginFailures } from '../src/middleware/ratelimit';
 import type { ProfileRecord, TokenRecord, UserRecord } from '../src/types';
+import type { TextureWardrobeRecord } from '../src/utils/wardrobe';
 
 const nonCanonicalModernSkin = Uint8Array.from(atob(
   'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAa0lEQVR42u3QBwEAIAzAMMb1LxiGD0gdNBG1ZZ4d5dO+HQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK/Ux1wXYi0EV47N+ssAAAAASUVORK5CYII=',
@@ -53,9 +54,9 @@ class Statement {
     return Promise.resolve({ results: this.db.all(this.sql, this.values) as T[] });
   }
 
-  run(): Promise<{ success: true }> {
-    this.db.run(this.sql, this.values);
-    return Promise.resolve({ success: true });
+  run(): Promise<{ success: true; meta: { changes: number } }> {
+    const changes = this.db.run(this.sql, this.values);
+    return Promise.resolve({ success: true, meta: { changes } });
   }
 
   execute(): void {
@@ -68,6 +69,7 @@ class MemoryD1 {
   public profiles = new Map<string, ProfileRecord>();
   public tokens = new Map<string, TokenRecord>();
   public sessions = new Map<string, { serverId: string; profileId: string; userId: string; expiresAt: number }>();
+  public textures = new Map<string, TextureWardrobeRecord>();
 
   prepare(sql: string): Statement {
     return new Statement(this, sql.replace(/\s+/g, ' ').trim());
@@ -94,6 +96,20 @@ class MemoryD1 {
     if (sql.startsWith('SELECT * FROM profiles WHERE id')) {
       const profile = this.profiles.get(String(values[0]));
       return profile ? { ...profile } : null;
+    }
+    if (sql.startsWith('SELECT * FROM texture_wardrobe WHERE user_id = ? AND hash = ?')) {
+      const texture = [...this.textures.values()].find((candidate) =>
+        candidate.user_id === values[0]
+        && candidate.hash === values[1]
+        && candidate.texture_type === values[2],
+      );
+      return texture ? { ...texture } : null;
+    }
+    if (sql.startsWith('SELECT COUNT(*)') && sql.includes('FROM texture_wardrobe')) {
+      if (sql.includes('WHERE hash = ?')) {
+        return { count: [...this.textures.values()].filter((texture) => texture.hash === values[0]).length };
+      }
+      return { count: [...this.textures.values()].filter((texture) => texture.user_id === values[0]).length };
     }
     if (sql.startsWith('SELECT COUNT(*)')) {
       const hash = values[0];
@@ -142,40 +158,96 @@ class MemoryD1 {
     return [];
   }
 
-  run(sql: string, values: unknown[]): void {
+  run(sql: string, values: unknown[]): number {
     if (sql.startsWith('INSERT INTO users')) {
       const [id, email, password, salt, role, created_at, updated_at] = values;
       this.users.set(String(id), { id: String(id), email: String(email), password: String(password), salt: String(salt), role: role as UserRecord['role'], created_at: Number(created_at), updated_at: Number(updated_at) });
+      return 1;
     } else if (sql.startsWith('INSERT INTO profiles')) {
       const [id, user_id, name, skin_hash, cape_hash, skin_model] = values;
       this.profiles.set(String(id), { id: String(id), user_id: String(user_id), name: String(name), skin_hash: skin_hash as string | null, cape_hash: cape_hash as string | null, skin_model: skin_model as ProfileRecord['skin_model'] });
+      return 1;
     } else if (sql.startsWith('INSERT INTO tokens')) {
       const [access_token, client_token, user_id, profile_id, created_at, expires_at] = values;
       this.tokens.set(String(access_token), { access_token: String(access_token), client_token: String(client_token), user_id: String(user_id), profile_id: String(profile_id), created_at: Number(created_at), expires_at: Number(expires_at) });
+      return 1;
     } else if (sql.startsWith('INSERT INTO server_sessions')) {
       const [serverId, profileId, userId, _createdAt, expiresAt] = values;
       this.sessions.set(String(serverId), { serverId: String(serverId), profileId: String(profileId), userId: String(userId), expiresAt: Number(expiresAt) });
+      return 1;
+    } else if (sql.startsWith('INSERT INTO texture_wardrobe')) {
+      const [id, userId, hash, textureType, name, model, width, height, size, createdAt, updatedAt, ownerId, limit] = values;
+      const duplicate = [...this.textures.values()].some((texture) =>
+        texture.user_id === ownerId && texture.hash === hash && texture.texture_type === textureType,
+      );
+      const count = [...this.textures.values()].filter((texture) => texture.user_id === ownerId).length;
+      if (duplicate || count >= Number(limit)) return 0;
+      this.textures.set(String(id), {
+        id: String(id),
+        user_id: String(userId),
+        hash: String(hash),
+        texture_type: textureType as TextureWardrobeRecord['texture_type'],
+        name: String(name),
+        model: model as TextureWardrobeRecord['model'],
+        width: width as number | null,
+        height: height as number | null,
+        size: size as number | null,
+        created_at: Number(createdAt),
+        updated_at: Number(updatedAt),
+      });
+      return 1;
     } else if (sql.startsWith('UPDATE users SET password')) {
       const [password, salt, updatedAt, userId] = values;
       const user = this.users.get(String(userId));
-      if (user) this.users.set(user.id, { ...user, password: String(password), salt: String(salt), updated_at: Number(updatedAt) });
+      if (!user) return 0;
+      this.users.set(user.id, { ...user, password: String(password), salt: String(salt), updated_at: Number(updatedAt) });
+      return 1;
     } else if (sql.startsWith('UPDATE users SET role')) {
       const [role, updatedAt, userId] = values;
       const user = this.users.get(String(userId));
-      if (user) this.users.set(user.id, { ...user, role: role as UserRecord['role'], updated_at: Number(updatedAt) });
+      if (!user) return 0;
+      this.users.set(user.id, { ...user, role: role as UserRecord['role'], updated_at: Number(updatedAt) });
+      return 1;
     } else if (sql.startsWith('UPDATE profiles SET skin_hash')) {
       const [hash, model, profileId] = values;
       const profile = this.profiles.get(String(profileId));
-      if (profile) this.profiles.set(profile.id, { ...profile, skin_hash: hash as string | null, skin_model: model as ProfileRecord['skin_model'] });
+      if (!profile) return 0;
+      if (sql.includes('EXISTS ( SELECT 1 FROM texture_wardrobe')) {
+        const texture = this.textures.get(String(values[4]));
+        if (
+          profile.user_id !== String(values[3])
+          || !texture
+          || texture.user_id !== String(values[5])
+          || texture.hash !== String(values[6])
+          || texture.texture_type !== values[7]
+        ) return 0;
+      }
+      this.profiles.set(profile.id, { ...profile, skin_hash: hash as string | null, skin_model: model as ProfileRecord['skin_model'] });
+      return 1;
     } else if (sql.startsWith('UPDATE profiles SET cape_hash')) {
       const [hash, profileId] = values;
       const profile = this.profiles.get(String(profileId));
-      if (profile) this.profiles.set(profile.id, { ...profile, cape_hash: hash as string | null });
+      if (!profile) return 0;
+      if (sql.includes('EXISTS ( SELECT 1 FROM texture_wardrobe')) {
+        const texture = this.textures.get(String(values[3]));
+        if (
+          profile.user_id !== String(values[2])
+          || !texture
+          || texture.user_id !== String(values[4])
+          || texture.hash !== String(values[5])
+          || texture.texture_type !== values[6]
+        ) return 0;
+      }
+      this.profiles.set(profile.id, { ...profile, cape_hash: hash as string | null });
+      return 1;
     } else if (sql.startsWith('DELETE FROM tokens WHERE user_id')) {
       for (const [key, token] of this.tokens) if (token.user_id === values[0]) this.tokens.delete(key);
+      return 1;
     } else if (sql.startsWith('DELETE FROM tokens WHERE access_token')) {
       this.tokens.delete(String(values[0]));
+      return 1;
     }
+    return 0;
   }
 }
 
@@ -241,7 +313,7 @@ describe('management API', () => {
 
     const remove = await app.request('/api/user/skin', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }, env);
     expect(remove.status).toBe(204);
-    expect(bucket.files.size).toBe(0);
+    expect(bucket.files.size).toBe(1);
   });
 
   it('rejects unsupported formats, invalid dimensions, fake headers, and truncated PNGs with stable codes', async () => {
