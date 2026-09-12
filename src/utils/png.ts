@@ -32,12 +32,32 @@ interface ParsedPng {
   height: number;
   bitDepth: number;
   colorType: number;
-  rowBytes: number;
-  filterBytesPerPixel: number;
+  passes: PngPass[];
   idat: Uint8Array[];
   palette: Uint8Array | null;
   transparency: Uint8Array | null;
 }
+
+interface PngPass {
+  xStart: number;
+  yStart: number;
+  xStep: number;
+  yStep: number;
+  width: number;
+  height: number;
+  rowBytes: number;
+  filterBytesPerPixel: number;
+}
+
+const ADAM7_PASSES: ReadonlyArray<[number, number, number, number]> = [
+  [0, 0, 8, 8],
+  [4, 0, 8, 8],
+  [0, 4, 4, 8],
+  [2, 0, 4, 4],
+  [0, 2, 2, 4],
+  [1, 0, 2, 2],
+  [0, 1, 1, 2],
+];
 
 const UNSUPPORTED_FORMAT = 'Only PNG files are supported.';
 const INVALID_DIMENSIONS = {
@@ -67,6 +87,20 @@ function uint16(bytes: Uint8Array, offset: number): number {
 
 function text(bytes: Uint8Array): string {
   return String.fromCharCode(...bytes);
+}
+
+function isAsciiLetter(value: number): boolean {
+  return (value >= 0x41 && value <= 0x5a) || (value >= 0x61 && value <= 0x7a);
+}
+
+function isValidChunkType(type: Uint8Array): boolean {
+  return type.length === 4
+    && type.every(isAsciiLetter)
+    && ((type[2] ?? 0) & 0x20) === 0;
+}
+
+function isAncillaryChunk(type: Uint8Array): boolean {
+  return ((type[0] ?? 0) & 0x20) !== 0;
 }
 
 let crcTable: Uint32Array | undefined;
@@ -137,6 +171,45 @@ function validateChunkCrc(bytes: Uint8Array, type: Uint8Array, data: Uint8Array,
   return uint32(bytes, crcOffset) === chunkCrc(type, data);
 }
 
+function pngPasses(
+  width: number,
+  height: number,
+  bitsPerPixel: number,
+  interlace: number,
+): PngPass[] | null {
+  const definitions = interlace === 0 ? [[0, 0, 1, 1] as const] : ADAM7_PASSES;
+  const passes: PngPass[] = [];
+  let totalScanlineBytes = 0;
+
+  for (const [xStart, yStart, xStep, yStep] of definitions) {
+    const passWidth = xStart < width ? Math.ceil((width - xStart) / xStep) : 0;
+    const passHeight = yStart < height ? Math.ceil((height - yStart) / yStep) : 0;
+    if (passWidth === 0 || passHeight === 0) continue;
+
+    const rowBytes = Math.ceil((passWidth * bitsPerPixel) / 8);
+    const scanlineBytes = (rowBytes + 1) * passHeight;
+    if (!Number.isSafeInteger(rowBytes)
+      || !Number.isSafeInteger(scanlineBytes)
+      || totalScanlineBytes + scanlineBytes > MAX_DECODED_BYTES) {
+      return null;
+    }
+
+    totalScanlineBytes += scanlineBytes;
+    passes.push({
+      xStart,
+      yStart,
+      xStep,
+      yStep,
+      width: passWidth,
+      height: passHeight,
+      rowBytes,
+      filterBytesPerPixel: Math.max(1, Math.ceil(bitsPerPixel / 8)),
+    });
+  }
+
+  return passes;
+}
+
 function parsePng(bytes: Uint8Array, kind: AssetKind): ParsedPng | PngFailure {
   if (bytes.byteLength > MAX_ASSET_BYTES) return failure('asset_too_large', 'The uploaded file must be 64 KB or smaller.');
   if (bytes.byteLength < PNG_SIGNATURE.length || !isSignature(bytes)) return failure('unsupported_format', UNSUPPORTED_FORMAT);
@@ -169,9 +242,12 @@ function parsePng(bytes: Uint8Array, kind: AssetKind): ParsedPng | PngFailure {
     }
 
     const typeBytes = bytes.subarray(typeOffset, dataOffset);
+    if (!isValidChunkType(typeBytes)) return failure('corrupt_png', CORRUPT_PNG);
     const chunkType = text(typeBytes);
     const data = bytes.subarray(dataOffset, dataEnd);
     if (!validateChunkCrc(bytes, typeBytes, data, crcOffset)) return failure('corrupt_png', CORRUPT_PNG);
+
+    if (!sawIhdr && chunkType !== 'IHDR') return failure('corrupt_png', CORRUPT_PNG);
 
     if (chunkType === 'IHDR') {
       if (sawIhdr || length !== 13 || offset !== PNG_SIGNATURE.length) return failure('corrupt_png', CORRUPT_PNG);
@@ -183,23 +259,26 @@ function parsePng(bytes: Uint8Array, kind: AssetKind): ParsedPng | PngFailure {
       if (data[10] !== 0 || data[11] !== 0) return failure('corrupt_png', CORRUPT_PNG);
       interlace = data[12] ?? 0;
     } else if (chunkType === 'PLTE') {
-      if (!sawIhdr || sawIdat || palette || length === 0 || length % 3 !== 0 || length > 768) {
+      if (sawIdat || palette || length === 0 || length % 3 !== 0 || length > 768
+        || colorType === 0 || colorType === 4 || transparency) {
         return failure('corrupt_png', CORRUPT_PNG);
       }
       palette = data;
     } else if (chunkType === 'tRNS') {
-      if (!sawIhdr || sawIdat || transparency) return failure('corrupt_png', CORRUPT_PNG);
+      if (sawIdat || transparency || colorType === 4 || colorType === 6
+        || (colorType === 3 && !palette)) return failure('corrupt_png', CORRUPT_PNG);
       transparency = data;
     } else if (chunkType === 'IDAT') {
-      if (!sawIhdr || endedIdat || length === 0) return failure('corrupt_png', CORRUPT_PNG);
+      if (endedIdat || length === 0 || (colorType === 3 && !palette)) {
+        return failure('corrupt_png', CORRUPT_PNG);
+      }
       sawIdat = true;
       idat.push(data);
     } else if (chunkType === 'IEND') {
-      if (!sawIhdr || !sawIdat || length !== 0) return failure('corrupt_png', CORRUPT_PNG);
+      if (!sawIdat || length !== 0) return failure('corrupt_png', CORRUPT_PNG);
       sawIend = true;
     } else {
-      if (sawIdat) endedIdat = true;
-      if ((typeBytes[0] ?? 0) < 0x61) return failure('corrupt_png', CORRUPT_PNG);
+      if (!isAncillaryChunk(typeBytes)) return failure('corrupt_png', CORRUPT_PNG);
     }
 
     if (chunkType !== 'IDAT' && sawIdat && chunkType !== 'IEND') endedIdat = true;
@@ -210,22 +289,24 @@ function parsePng(bytes: Uint8Array, kind: AssetKind): ParsedPng | PngFailure {
   if (!width || !height || !isSupportedDimensions(width, height, kind)) {
     return failure('invalid_dimensions', INVALID_DIMENSIONS[kind]);
   }
-  if (interlace !== 0 || !isValidBitDepth(colorType, bitDepth)) return failure('corrupt_png', CORRUPT_PNG);
+  if ((interlace !== 0 && interlace !== 1) || !isValidBitDepth(colorType, bitDepth)) {
+    return failure('corrupt_png', CORRUPT_PNG);
+  }
 
   const channels = colorChannels(colorType);
   const bitsPerPixel = channels * bitDepth;
-  const rowBytes = Math.ceil((width * bitsPerPixel) / 8);
-  const filterBytesPerPixel = Math.max(1, Math.ceil(bitsPerPixel / 8));
-  const scanlineBytes = (rowBytes + 1) * height;
-  if (!Number.isSafeInteger(scanlineBytes) || scanlineBytes > MAX_DECODED_BYTES) {
+  const passes = pngPasses(width, height, bitsPerPixel, interlace);
+  const pixelBytes = width * height * 4;
+  if (!passes || !Number.isSafeInteger(pixelBytes) || pixelBytes > MAX_DECODED_BYTES) {
     return failure('asset_too_large', 'The decoded PNG is too large.');
   }
   if (colorType === 3 && !palette) return failure('corrupt_png', CORRUPT_PNG);
+  if (palette && (colorType === 0 || colorType === 4)) return failure('corrupt_png', CORRUPT_PNG);
   if (palette && colorType === 3 && palette.length / 3 > (1 << bitDepth)) return failure('corrupt_png', CORRUPT_PNG);
   if (transparency) {
     const validTransparency = colorType === 0 ? transparency.length === 2
       : colorType === 2 ? transparency.length === 6
-        : colorType === 3 ? transparency.length <= 256
+        : colorType === 3 ? palette !== null && transparency.length <= palette.length / 3
           : false;
     if (!validTransparency) return failure('corrupt_png', CORRUPT_PNG);
   }
@@ -235,8 +316,7 @@ function parsePng(bytes: Uint8Array, kind: AssetKind): ParsedPng | PngFailure {
     height,
     bitDepth,
     colorType,
-    rowBytes,
-    filterBytesPerPixel,
+    passes,
     idat,
     palette,
     transparency,
@@ -305,32 +385,29 @@ function paeth(left: number, above: number, upperLeft: number): number {
   return upperLeft;
 }
 
-function unfilter(inflated: Uint8Array, parsed: ParsedPng): Uint8Array | null {
-  const expectedLength = (parsed.rowBytes + 1) * parsed.height;
-  if (inflated.byteLength !== expectedLength) return null;
-
-  const pixels = new Uint8Array(parsed.rowBytes * parsed.height);
-  const previous = new Uint8Array(parsed.rowBytes);
-  for (let y = 0; y < parsed.height; y += 1) {
-    const sourceOffset = y * (parsed.rowBytes + 1);
-    const filter = inflated[sourceOffset];
-    if (filter === undefined || filter > 4) return null;
-    const filtered = inflated.subarray(sourceOffset + 1, sourceOffset + 1 + parsed.rowBytes);
-    const row = pixels.subarray(y * parsed.rowBytes, (y + 1) * parsed.rowBytes);
-    for (let index = 0; index < parsed.rowBytes; index += 1) {
-      const left = index >= parsed.filterBytesPerPixel ? row[index - parsed.filterBytesPerPixel] ?? 0 : 0;
-      const above = previous[index] ?? 0;
-      const upperLeft = index >= parsed.filterBytesPerPixel ? previous[index - parsed.filterBytesPerPixel] ?? 0 : 0;
-      const value = filtered[index] ?? 0;
-      row[index] = (filter === 0 ? value
-        : filter === 1 ? value + left
-          : filter === 2 ? value + above
-            : filter === 3 ? value + Math.floor((left + above) / 2)
-              : value + paeth(left, above, upperLeft)) & 0xff;
-    }
-    previous.set(row);
+function unfilterRow(
+  inflated: Uint8Array,
+  offset: number,
+  row: Uint8Array,
+  previous: Uint8Array,
+  filterBytesPerPixel: number,
+): number | null {
+  const filter = inflated[offset];
+  if (filter === undefined || filter > 4 || offset + 1 + row.length > inflated.byteLength) return null;
+  const filtered = inflated.subarray(offset + 1, offset + 1 + row.length);
+  for (let index = 0; index < row.length; index += 1) {
+    const left = index >= filterBytesPerPixel ? row[index - filterBytesPerPixel] ?? 0 : 0;
+    const above = previous[index] ?? 0;
+    const upperLeft = index >= filterBytesPerPixel ? previous[index - filterBytesPerPixel] ?? 0 : 0;
+    const value = filtered[index] ?? 0;
+    row[index] = (filter === 0 ? value
+      : filter === 1 ? value + left
+        : filter === 2 ? value + above
+          : filter === 3 ? value + Math.floor((left + above) / 2)
+            : value + paeth(left, above, upperLeft)) & 0xff;
   }
-  return pixels;
+  previous.set(row);
+  return offset + 1 + row.length;
 }
 
 function sample(row: Uint8Array, index: number, bitDepth: number): number {
@@ -348,70 +425,84 @@ function toByte(value: number, bitDepth: number): number {
   return Math.round((value * 255) / ((1 << bitDepth) - 1));
 }
 
-function decodePixels(inflated: Uint8Array, parsed: ParsedPng): Uint8Array | null {
-  const filtered = unfilter(inflated, parsed);
-  if (!filtered) return null;
-  const rgba = new Uint8Array(parsed.width * parsed.height * 4);
+function decodePixel(row: Uint8Array, x: number, parsed: ParsedPng): [number, number, number, number] | null {
   const sampleBytes = parsed.bitDepth === 16 ? 2 : parsed.bitDepth === 8 ? 1 : 0;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let alpha = 255;
 
-  for (let y = 0; y < parsed.height; y += 1) {
-    const row = filtered.subarray(y * parsed.rowBytes, (y + 1) * parsed.rowBytes);
-    for (let x = 0; x < parsed.width; x += 1) {
-      const outputOffset = (y * parsed.width + x) * 4;
-      let red = 0;
-      let green = 0;
-      let blue = 0;
-      let alpha = 255;
+  if (parsed.colorType === 0) {
+    const graySample = sample(row, parsed.bitDepth === 16 ? x * 2 : x, parsed.bitDepth);
+    red = toByte(graySample, parsed.bitDepth);
+    green = red;
+    blue = red;
+    if (parsed.transparency && graySample === uint16(parsed.transparency, 0)) alpha = 0;
+  } else if (parsed.colorType === 2) {
+    const offset = x * 3 * sampleBytes;
+    const redSample = sample(row, offset, parsed.bitDepth);
+    const greenSample = sample(row, offset + sampleBytes, parsed.bitDepth);
+    const blueSample = sample(row, offset + sampleBytes * 2, parsed.bitDepth);
+    red = toByte(redSample, parsed.bitDepth);
+    green = toByte(greenSample, parsed.bitDepth);
+    blue = toByte(blueSample, parsed.bitDepth);
+    if (parsed.transparency && redSample === uint16(parsed.transparency, 0)
+      && greenSample === uint16(parsed.transparency, 2)
+      && blueSample === uint16(parsed.transparency, 4)) alpha = 0;
+  } else if (parsed.colorType === 3) {
+    const paletteIndex = sample(row, x, parsed.bitDepth);
+    const paletteOffset = paletteIndex * 3;
+    if (!parsed.palette || paletteOffset + 2 >= parsed.palette.length) return null;
+    red = parsed.palette[paletteOffset] ?? 0;
+    green = parsed.palette[paletteOffset + 1] ?? 0;
+    blue = parsed.palette[paletteOffset + 2] ?? 0;
+    alpha = parsed.transparency?.[paletteIndex] ?? 255;
+  } else if (parsed.colorType === 4) {
+    const offset = x * 2 * sampleBytes;
+    const gray = sample(row, offset, parsed.bitDepth);
+    red = toByte(gray, parsed.bitDepth);
+    green = red;
+    blue = red;
+    alpha = toByte(sample(row, offset + sampleBytes, parsed.bitDepth), parsed.bitDepth);
+  } else if (parsed.colorType === 6) {
+    const offset = x * 4 * sampleBytes;
+    red = toByte(sample(row, offset, parsed.bitDepth), parsed.bitDepth);
+    green = toByte(sample(row, offset + sampleBytes, parsed.bitDepth), parsed.bitDepth);
+    blue = toByte(sample(row, offset + sampleBytes * 2, parsed.bitDepth), parsed.bitDepth);
+    alpha = toByte(sample(row, offset + sampleBytes * 3, parsed.bitDepth), parsed.bitDepth);
+  } else {
+    return null;
+  }
 
-      if (parsed.colorType === 0) {
-        const graySample = sample(row, parsed.bitDepth === 16 ? x * 2 : x, parsed.bitDepth);
-        red = toByte(graySample, parsed.bitDepth);
-        green = red;
-        blue = red;
-        if (parsed.transparency && graySample === uint16(parsed.transparency, 0)) alpha = 0;
-      } else if (parsed.colorType === 2) {
-        const offset = x * 3 * sampleBytes;
-        const redSample = sample(row, offset, parsed.bitDepth);
-        const greenSample = sample(row, offset + sampleBytes, parsed.bitDepth);
-        const blueSample = sample(row, offset + sampleBytes * 2, parsed.bitDepth);
-        red = toByte(redSample, parsed.bitDepth);
-        green = toByte(greenSample, parsed.bitDepth);
-        blue = toByte(blueSample, parsed.bitDepth);
-        if (parsed.transparency && redSample === uint16(parsed.transparency, 0)
-          && greenSample === uint16(parsed.transparency, 2)
-          && blueSample === uint16(parsed.transparency, 4)) alpha = 0;
-      } else if (parsed.colorType === 3) {
-        const paletteIndex = sample(row, x, parsed.bitDepth);
-        const paletteOffset = paletteIndex * 3;
-        if (!parsed.palette || paletteOffset + 2 >= parsed.palette.length) return null;
-        red = parsed.palette[paletteOffset] ?? 0;
-        green = parsed.palette[paletteOffset + 1] ?? 0;
-        blue = parsed.palette[paletteOffset + 2] ?? 0;
-        alpha = parsed.transparency?.[paletteIndex] ?? 255;
-      } else if (parsed.colorType === 4) {
-        const offset = x * 2 * sampleBytes;
-        const gray = sample(row, offset, parsed.bitDepth);
-        red = toByte(gray, parsed.bitDepth);
-        green = red;
-        blue = red;
-        alpha = toByte(sample(row, offset + sampleBytes, parsed.bitDepth), parsed.bitDepth);
-      } else if (parsed.colorType === 6) {
-        const offset = x * 4 * sampleBytes;
-        red = toByte(sample(row, offset, parsed.bitDepth), parsed.bitDepth);
-        green = toByte(sample(row, offset + sampleBytes, parsed.bitDepth), parsed.bitDepth);
-        blue = toByte(sample(row, offset + sampleBytes * 2, parsed.bitDepth), parsed.bitDepth);
-        alpha = toByte(sample(row, offset + sampleBytes * 3, parsed.bitDepth), parsed.bitDepth);
-      } else {
-        return null;
+  return [red, green, blue, alpha];
+}
+
+function decodePixels(inflated: Uint8Array, parsed: ParsedPng): Uint8Array | null {
+  const rgba = new Uint8Array(parsed.width * parsed.height * 4);
+  let offset = 0;
+
+  for (const pass of parsed.passes) {
+    const previous = new Uint8Array(pass.rowBytes);
+    const row = new Uint8Array(pass.rowBytes);
+    for (let passY = 0; passY < pass.height; passY += 1) {
+      const nextOffset = unfilterRow(inflated, offset, row, previous, pass.filterBytesPerPixel);
+      if (nextOffset === null) return null;
+      offset = nextOffset;
+      const outputY = pass.yStart + passY * pass.yStep;
+      for (let passX = 0; passX < pass.width; passX += 1) {
+        const pixel = decodePixel(row, passX, parsed);
+        if (!pixel) return null;
+        const outputX = pass.xStart + passX * pass.xStep;
+        const outputOffset = (outputY * parsed.width + outputX) * 4;
+        rgba[outputOffset] = pixel[0];
+        rgba[outputOffset + 1] = pixel[1];
+        rgba[outputOffset + 2] = pixel[2];
+        rgba[outputOffset + 3] = pixel[3];
       }
-
-      rgba[outputOffset] = red;
-      rgba[outputOffset + 1] = green;
-      rgba[outputOffset + 2] = blue;
-      rgba[outputOffset + 3] = alpha;
     }
   }
-  return rgba;
+
+  return offset === inflated.byteLength ? rgba : null;
 }
 
 function copyTextureRect(
@@ -480,7 +571,11 @@ export async function normalizePng(input: ArrayBuffer | Uint8Array, kind: AssetK
 
   try {
     const compressed = joinBytes(parsed.idat);
-    const inflated = await inflate(compressed, (parsed.rowBytes + 1) * parsed.height);
+    const maxInflatedBytes = parsed.passes.reduce(
+      (total, pass) => total + (pass.rowBytes + 1) * pass.height,
+      0,
+    );
+    const inflated = await inflate(compressed, maxInflatedBytes);
     const pixels = decodePixels(inflated, parsed);
     if (!pixels) return failure('corrupt_png', CORRUPT_PNG);
     const legacyConverted = kind === 'skin' && parsed.height === 32;

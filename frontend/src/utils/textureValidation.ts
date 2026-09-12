@@ -7,6 +7,7 @@ export const TEXTURE_DIMENSION_INSTRUCTIONS = {
   cape: '请上传 64 × 32 或 1024 × 512 PNG；不会拉伸图片。',
 } as const;
 export const TEXTURE_CORRUPT_INSTRUCTION = 'PNG 文件损坏或无法读取；请修复后再试。';
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 export type TextureValidation =
   | { ok: true; width: number; height: number }
@@ -38,12 +39,30 @@ function loadImageDimensions(file: File): Promise<{ width: number; height: numbe
   });
 }
 
+async function hasPngSignature(file: File): Promise<boolean> {
+  try {
+    const header = await new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file.slice(0, PNG_SIGNATURE.length));
+    });
+    return PNG_SIGNATURE.every((value, index) => header[index] === value);
+  } catch {
+    return false;
+  }
+}
+
 export async function validateTextureFile(
   file: File,
   asset: TextureAsset,
 ): Promise<TextureValidation> {
   if (file.type !== 'image/png') {
     return { ok: false, code: 'unsupported_format', message: TEXTURE_FORMAT_INSTRUCTION };
+  }
+
+  if (!(await hasPngSignature(file))) {
+    return { ok: false, code: 'corrupt_png', message: TEXTURE_CORRUPT_INSTRUCTION };
   }
 
   let dimensions: { width: number; height: number };

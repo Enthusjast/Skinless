@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEXTURE_DIMENSION_INSTRUCTIONS } from '../utils/textureValidation';
 import SkinUploader from './SkinUploader.vue';
 
+const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 beforeEach(() => {
   setActivePinia(createPinia());
 });
@@ -29,6 +31,16 @@ describe('SkinUploader', () => {
       createObjectURL: vi.fn(() => 'blob:texture'),
       revokeObjectURL: vi.fn(),
     });
+    class FakeFileReader {
+      result: ArrayBuffer = PNG_SIGNATURE.buffer;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      readAsArrayBuffer() {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal('FileReader', FakeFileReader);
 
     const wrapper = mount(SkinUploader, {
       props: { asset: 'skin', currentHash: null, model: 'classic' },
@@ -36,7 +48,7 @@ describe('SkinUploader', () => {
     const input = wrapper.get('input[type="file"]');
     Object.defineProperty(input.element, 'files', {
       configurable: true,
-      value: [new File(['png'], 'wrong-size.png', { type: 'image/png' })],
+      value: [new File([PNG_SIGNATURE], 'wrong-size.png', { type: 'image/png' })],
     });
 
     await input.trigger('change');
