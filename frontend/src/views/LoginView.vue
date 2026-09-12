@@ -14,9 +14,11 @@ const showPassword = ref(false);
 const notice = ref(
   route.query.changed === '1'
     ? '密码已更新，请使用新密码登录。'
-    : route.query.registered === '1'
-      ? '账号创建成功，现在可以登录了。'
-      : '',
+    : route.query.reset === '1'
+      ? '密码已重置，现在可以使用新密码登录。'
+      : route.query.registered === '1'
+        ? '账号创建成功，现在可以登录了。'
+        : '',
 );
 
 async function submit() {
@@ -92,6 +94,7 @@ async function submit() {
           <LockKeyhole :size="17" aria-hidden="true" />{{ auth.loading ? '登录中…' : '登录' }}
         </button>
       </form>
+      <RouterLink to="/forgot-password" class="auth-link">忘记密码？通过邮箱重置</RouterLink>
       <RouterLink to="/register" class="auth-link">还没有账号？立即注册</RouterLink>
     </section>
   </section>

@@ -1,9 +1,11 @@
 import type { RegistrationMode } from "./utils/registration";
 import type { MailSender } from "./utils/mail";
+import type { AccountChallengePurpose } from "./utils/account";
 
 export type UserRole = "user" | "admin";
 export type SkinModel = "classic" | "slim";
 export type { RegistrationMode } from "./utils/registration";
+export type { AccountChallengePurpose } from "./utils/account";
 
 export interface Bindings {
   DB: D1Database;
@@ -120,6 +122,19 @@ export interface PendingRegistrationRecord {
 export interface RegistrationChallengeRecord {
   id: string;
   pending_registration_id: string;
+  code_hash: string;
+  attempts: number;
+  last_sent_at: number;
+  expires_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AccountChallengeRecord {
+  id: string;
+  user_id: string;
+  purpose: AccountChallengePurpose;
+  email: string;
   code_hash: string;
   attempts: number;
   last_sent_at: number;

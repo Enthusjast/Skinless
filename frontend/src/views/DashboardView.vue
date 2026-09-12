@@ -3,6 +3,7 @@ import { Copy, KeyRound, ShieldCheck } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError } from '../api';
+import EmailChangeForm from '../components/EmailChangeForm.vue';
 import UiCard from '../components/common/UiCard.vue';
 import SessionManagement from '../components/SessionManagement.vue';
 import ProfileManagement from '../components/ProfileManagement.vue';
@@ -164,6 +165,7 @@ async function changePassword() {
         </form>
         <p v-if="passwordMessage" class="form-success" role="status">{{ passwordMessage }}</p>
         <p v-if="passwordError" class="form-error" role="alert">{{ passwordError }}</p>
+        <EmailChangeForm />
         <SessionManagement />
       </UiCard>
     </div>

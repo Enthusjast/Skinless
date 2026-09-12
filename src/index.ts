@@ -5,6 +5,7 @@ import sessionRoutes from './routes/session';
 import textureRoutes from './routes/textures';
 import apiRoutes from './routes/api';
 import registrationRoutes from './routes/registration';
+import accountRoutes from './routes/account';
 import { corsMiddleware } from './middleware/cors';
 import { securityHeadersMiddleware } from './middleware/security';
 import { metadata } from './utils/config';
@@ -32,6 +33,7 @@ app.route('/', textureRoutes);
 app.route('/api/yggdrasil', textureRoutes);
 app.route('/api', apiRoutes);
 app.route('/api/auth', registrationRoutes);
+app.route('/api', accountRoutes);
 
 app.onError((error, c) => {
   console.error(error);

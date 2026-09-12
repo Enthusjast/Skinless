@@ -78,6 +78,20 @@ export interface RegistrationVerifyResponse {
   user: ApiUser;
 }
 
+export interface PasswordResetStartResponse {
+  message: string;
+  challengeId: string;
+  expiresAt: number;
+  resendAfter: number;
+}
+
+export interface EmailChangeChallengeResponse {
+  challengeId: string;
+  email: string;
+  expiresAt: number;
+  resendAfter: number;
+}
+
 export interface WebSession {
   id: string;
   deviceLabel: string;
@@ -335,6 +349,41 @@ export function resendRegistration(challengeId: string): Promise<RegistrationSta
   });
 }
 
+export function startPasswordReset(
+  email: string,
+  turnstileToken?: string,
+): Promise<PasswordResetStartResponse> {
+  const body: { email: string; turnstileToken?: string } = { email };
+  if (turnstileToken?.trim()) body.turnstileToken = turnstileToken.trim();
+  return request<PasswordResetStartResponse>('/api/auth/password/reset/start', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function resendPasswordReset(
+  challengeId: string,
+  turnstileToken?: string,
+): Promise<PasswordResetStartResponse> {
+  const body: { challengeId: string; turnstileToken?: string } = { challengeId };
+  if (turnstileToken?.trim()) body.turnstileToken = turnstileToken.trim();
+  return request<PasswordResetStartResponse>('/api/auth/password/reset/resend', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function verifyPasswordReset(
+  challengeId: string,
+  code: string,
+  newPassword: string,
+): Promise<void> {
+  return request<void>('/api/auth/password/reset/verify', {
+    method: 'POST',
+    body: JSON.stringify({ challengeId, code, newPassword }),
+  });
+}
+
 export function login(
   email: string,
   password: string,
@@ -468,6 +517,49 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
   return managementRequest<void>('/api/user/password', {
     method: 'PUT',
     body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
+export function startEmailChange(
+  currentPassword: string,
+  newEmail: string,
+  turnstileToken?: string,
+): Promise<EmailChangeChallengeResponse> {
+  const body: { currentPassword: string; newEmail: string; turnstileToken?: string } = {
+    currentPassword,
+    newEmail,
+  };
+  if (turnstileToken?.trim()) body.turnstileToken = turnstileToken.trim();
+  return managementRequest<EmailChangeChallengeResponse>('/api/user/email/change/start', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function resendEmailChange(
+  challengeId: string,
+  turnstileToken?: string,
+): Promise<EmailChangeChallengeResponse> {
+  const body: { challengeId: string; turnstileToken?: string } = { challengeId };
+  if (turnstileToken?.trim()) body.turnstileToken = turnstileToken.trim();
+  return managementRequest<EmailChangeChallengeResponse>('/api/user/email/change/resend', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function completeEmailChange(
+  challengeId: string,
+  code: string,
+  currentPassword?: string,
+): Promise<{ user: ApiUser }> {
+  return managementRequest<{ user: ApiUser }>('/api/user/email', {
+    method: 'PUT',
+    body: JSON.stringify({
+      challengeId,
+      code,
+      ...(currentPassword ? { currentPassword } : {}),
+    }),
   });
 }
 

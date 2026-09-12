@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import {
   changePassword,
+  completeEmailChange,
   createProfile,
   clearCsrfToken,
   deleteAsset,
@@ -10,11 +11,16 @@ import {
   login as loginWithCookies,
   logout as logoutWithCookies,
   renameProfile,
+  resendEmailChange,
+  resendPasswordReset,
   resendRegistration,
+  startEmailChange,
+  startPasswordReset,
   startRegistration,
   setCsrfToken,
   setDefaultProfile,
   uploadAsset,
+  verifyPasswordReset,
   verifyRegistration,
   type ApiProfile,
   type ApiUser,
@@ -96,6 +102,29 @@ export const useAuthStore = defineStore('auth', {
     },
     async registerResend(challengeId: string) {
       return resendRegistration(challengeId);
+    },
+    async startPasswordReset(email: string, turnstileToken?: string) {
+      return startPasswordReset(email, turnstileToken);
+    },
+    async verifyPasswordReset(challengeId: string, code: string, newPassword: string) {
+      return verifyPasswordReset(challengeId, code, newPassword);
+    },
+    async resendPasswordReset(challengeId: string, turnstileToken?: string) {
+      return resendPasswordReset(challengeId, turnstileToken);
+    },
+    async startEmailChange(currentPassword: string, newEmail: string, turnstileToken?: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      return startEmailChange(currentPassword, newEmail, turnstileToken);
+    },
+    async resendEmailChange(challengeId: string, turnstileToken?: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      return resendEmailChange(challengeId, turnstileToken);
+    },
+    async completeEmailChange(challengeId: string, code: string, currentPassword?: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      const response = await completeEmailChange(challengeId, code, currentPassword);
+      this.user = response.user;
+      return response.user;
     },
     async logout() {
       const request = logoutWithCookies();

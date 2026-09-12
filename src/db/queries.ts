@@ -10,7 +10,12 @@ import type {
   RegistrationInviteRecord,
   SiteSettingsRecord,
   WebSessionRecord,
+  AccountChallengeRecord,
 } from "../types";
+import {
+  ACCOUNT_CHALLENGE_MAX_ATTEMPTS,
+  type AccountChallengePurpose,
+} from "../utils/account";
 import type { RegistrationSettingsValues } from "../utils/registration";
 import type { TextureType, TextureWardrobeRecord } from "../utils/wardrobe";
 
@@ -65,7 +70,7 @@ export async function findUserByEmail(
   email: string,
 ): Promise<UserRecord | null> {
   return db
-    .prepare("SELECT * FROM users WHERE email = ? LIMIT 1")
+    .prepare("SELECT * FROM users WHERE email = ? COLLATE NOCASE LIMIT 1")
     .bind(email)
     .first<UserRecord>();
 }
@@ -467,6 +472,228 @@ export async function listWebSessions(
     .bind(userId, now)
     .all<WebSessionSummary>();
   return result.results;
+}
+
+export async function findAccountChallengeById(
+  db: D1Database,
+  id: string,
+  purpose: AccountChallengePurpose,
+  userId?: string,
+): Promise<AccountChallengeRecord | null> {
+  const statement = userId
+    ? db
+        .prepare(
+          `SELECT * FROM account_challenges
+           WHERE id = ? AND purpose = ? AND user_id = ?
+           LIMIT 1`,
+        )
+        .bind(id, purpose, userId)
+    : db
+        .prepare(
+          `SELECT * FROM account_challenges
+           WHERE id = ? AND purpose = ?
+           LIMIT 1`,
+        )
+        .bind(id, purpose);
+  return statement.first<AccountChallengeRecord>();
+}
+
+export async function findAccountChallengeByUserAndPurpose(
+  db: D1Database,
+  userId: string,
+  purpose: AccountChallengePurpose,
+): Promise<AccountChallengeRecord | null> {
+  return db
+    .prepare(
+      `SELECT * FROM account_challenges
+       WHERE user_id = ? AND purpose = ?
+       LIMIT 1`,
+    )
+    .bind(userId, purpose)
+    .first<AccountChallengeRecord>();
+}
+
+export async function upsertAccountChallenge(
+  db: D1Database,
+  challenge: AccountChallengeRecord,
+): Promise<AccountChallengeRecord | null> {
+  await db
+    .prepare(
+      `INSERT INTO account_challenges
+       (id, user_id, purpose, email, code_hash, attempts, last_sent_at, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, purpose) DO UPDATE SET
+         email = excluded.email,
+         code_hash = excluded.code_hash,
+         attempts = excluded.attempts,
+         last_sent_at = excluded.last_sent_at,
+         expires_at = excluded.expires_at,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      challenge.id,
+      challenge.user_id,
+      challenge.purpose,
+      challenge.email,
+      challenge.code_hash,
+      challenge.attempts,
+      challenge.last_sent_at,
+      challenge.expires_at,
+      challenge.created_at,
+      challenge.updated_at,
+    )
+    .run();
+  return findAccountChallengeByUserAndPurpose(
+    db,
+    challenge.user_id,
+    challenge.purpose,
+  );
+}
+
+export async function updateAccountChallenge(
+  db: D1Database,
+  challenge: Pick<AccountChallengeRecord, 'id' | 'user_id' | 'purpose'>,
+  codeHash: string,
+  sentAt: number,
+  expiresAt: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE account_challenges
+       SET code_hash = ?, attempts = 0, last_sent_at = ?, expires_at = ?, updated_at = ?
+       WHERE id = ? AND user_id = ? AND purpose = ?`,
+    )
+    .bind(
+      codeHash,
+      sentAt,
+      expiresAt,
+      sentAt,
+      challenge.id,
+      challenge.user_id,
+      challenge.purpose,
+    )
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function incrementAccountChallengeAttempts(
+  db: D1Database,
+  challengeId: string,
+  purpose: AccountChallengePurpose,
+  now: number,
+  userId?: string,
+): Promise<boolean> {
+  const statement = userId
+    ? db
+        .prepare(
+          `UPDATE account_challenges
+           SET attempts = attempts + 1, updated_at = ?
+           WHERE id = ? AND purpose = ? AND user_id = ?
+             AND attempts < ? AND expires_at > ?`,
+        )
+        .bind(now, challengeId, purpose, userId, ACCOUNT_CHALLENGE_MAX_ATTEMPTS, now)
+    : db
+        .prepare(
+          `UPDATE account_challenges
+           SET attempts = attempts + 1, updated_at = ?
+           WHERE id = ? AND purpose = ?
+             AND attempts < ? AND expires_at > ?`,
+        )
+        .bind(now, challengeId, purpose, ACCOUNT_CHALLENGE_MAX_ATTEMPTS, now);
+  const result = await statement.run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function completePasswordReset(
+  db: D1Database,
+  challenge: Pick<AccountChallengeRecord, 'id' | 'user_id' | 'purpose'>,
+  password: string,
+  salt: string,
+  updatedAt: number,
+): Promise<boolean> {
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE users
+         SET password = ?, salt = ?, updated_at = ?
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM account_challenges
+           WHERE id = ? AND user_id = ? AND purpose = ? AND expires_at > ?
+         )`,
+      )
+      .bind(
+        password,
+        salt,
+        updatedAt,
+        challenge.user_id,
+        challenge.id,
+        challenge.user_id,
+        challenge.purpose,
+        updatedAt,
+      ),
+    db
+      .prepare(
+        `DELETE FROM account_challenges
+         WHERE id = ? AND user_id = ? AND purpose = ? AND expires_at > ?`,
+      )
+      .bind(challenge.id, challenge.user_id, challenge.purpose, updatedAt),
+  ]);
+  const userUpdate = results[0] as { meta?: { changes?: number } } | undefined;
+  return (userUpdate?.meta?.changes ?? 0) > 0;
+}
+
+export async function completeEmailChange(
+  db: D1Database,
+  challenge: Pick<AccountChallengeRecord, 'id' | 'user_id' | 'purpose'>,
+  email: string,
+  updatedAt: number,
+): Promise<boolean> {
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE users
+         SET email = ?, email_verified_at = ?, updated_at = ?
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM account_challenges
+           WHERE id = ? AND user_id = ? AND purpose = ? AND email = ? COLLATE NOCASE
+             AND expires_at > ?
+         ) AND NOT EXISTS (
+           SELECT 1 FROM users existing
+           WHERE existing.id <> ? AND existing.email = ? COLLATE NOCASE
+         )`,
+      )
+      .bind(
+        email,
+        updatedAt,
+        updatedAt,
+        challenge.user_id,
+        challenge.id,
+        challenge.user_id,
+        challenge.purpose,
+        email,
+        updatedAt,
+        challenge.user_id,
+        email,
+      ),
+    db
+      .prepare(
+        `DELETE FROM account_challenges
+         WHERE id = ? AND user_id = ? AND purpose = ? AND expires_at > ?
+           AND EXISTS (
+             SELECT 1 FROM users WHERE id = ? AND email = ? COLLATE NOCASE
+           )`,
+      )
+      .bind(
+        challenge.id,
+        challenge.user_id,
+        challenge.purpose,
+        updatedAt,
+        challenge.user_id,
+        email,
+      ),
+  ]);
+  const userUpdate = results[0] as { meta?: { changes?: number } } | undefined;
+  return (userUpdate?.meta?.changes ?? 0) > 0;
 }
 
 export async function findSiteSettings(

@@ -3,15 +3,21 @@ import {
   ApiError,
   changePassword,
   createAdminInvite,
+  completeEmailChange,
   formatApiError,
   getAdminInvites,
   getAdminSettings,
   login,
+  resendEmailChange,
+  resendPasswordReset,
   refreshSession,
   register,
   revokeAdminInvite,
   setCsrfToken,
+  startEmailChange,
+  startPasswordReset,
   updateAdminSettings,
+  verifyPasswordReset,
 } from './api';
 
 afterEach(() => {
@@ -386,6 +392,95 @@ describe('API error parsing', () => {
       status: 503,
       message: 'Request failed with status 503.',
       code: undefined,
+    });
+  });
+
+  it('routes recovery and email-change requests through their public contracts', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: 'If an account exists for this email, a password reset code has been sent.',
+            challengeId: 'reset-1',
+            expiresAt: 1,
+            resendAfter: 2,
+          }),
+          {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: 'If an account exists for this email, a password reset code has been sent.',
+            challengeId: 'reset-1',
+            expiresAt: 3,
+            resendAfter: 4,
+          }),
+          {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            challengeId: 'email-1',
+            email: 'new@example.com',
+            expiresAt: 5,
+            resendAfter: 6,
+          }),
+          {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: {} }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    setCsrfToken('csrf-token');
+
+    await startPasswordReset(' PLAYER@EXAMPLE.COM ');
+    await resendPasswordReset('reset-1');
+    await verifyPasswordReset('reset-1', '731042', 'new-password');
+    await startEmailChange('current-password', 'new@example.com');
+    await resendEmailChange('email-1');
+    await completeEmailChange('email-1', '042731', 'current-password');
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/auth/password/reset/start',
+      '/api/auth/password/reset/resend',
+      '/api/auth/password/reset/verify',
+      '/api/user/email/change/start',
+      '/api/user/email/change/resend',
+      '/api/user/email',
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      email: ' PLAYER@EXAMPLE.COM ',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      challengeId: 'reset-1',
+      code: '731042',
+      newPassword: 'new-password',
+    });
+    expect(new Headers(fetchMock.mock.calls[3]?.[1]?.headers).get('X-CSRF-Token')).toBe(
+      'csrf-token',
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
+      challengeId: 'email-1',
+      code: '042731',
+      currentPassword: 'current-password',
     });
   });
 });

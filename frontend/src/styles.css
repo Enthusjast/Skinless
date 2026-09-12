@@ -1737,6 +1737,22 @@ h3 {
 .inline-form .button {
   flex: 0 0 auto;
 }
+.email-change-form {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+.email-change-verify-form {
+  flex-wrap: wrap;
+  align-items: start;
+}
+.email-change-verify-form .field {
+  min-width: min(260px, 100%);
+}
+.email-change-verify-form .registration-actions {
+  flex-basis: 100%;
+  margin-top: 0;
+}
 .session-management {
   margin-top: 28px;
   padding-top: 24px;

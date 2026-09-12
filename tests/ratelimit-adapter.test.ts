@@ -3,6 +3,8 @@ import {
   admitLoginAttempt,
   checkLoginLimit,
   clearLoginFailuresDistributed,
+  recordAccountChallengeEmailAttempt,
+  recordAccountChallengeIpAttempt,
   recordLoginFailureDistributed,
   recordRegistrationEmailAttempt,
   recordRegistrationIpAttempt,
@@ -33,6 +35,23 @@ class RecordingNamespace {
 }
 
 describe('distributed rate limiter adapter', () => {
+  it('keeps password-reset and email-change challenge windows purpose-scoped', async () => {
+    const namespace = new RecordingNamespace();
+    const env = { RATE_LIMITER: namespace };
+
+    await recordAccountChallengeIpAttempt(env, 'password_reset', '198.51.100.30');
+    await recordAccountChallengeEmailAttempt(env, 'email_change', ' New@EXAMPLE.com ');
+
+    expect(namespace.names).toEqual([
+      'account:password_reset:ip:198.51.100.30',
+      'account:email_change:email:new@example.com',
+    ]);
+    expect(namespace.requests.map(({ body }) => body)).toEqual([
+      { action: 'record', windowMs: 3600000, limit: 5, blockMs: 3600000 },
+      { action: 'record', windowMs: 3600000, limit: 3, blockMs: 3600000 },
+    ]);
+  });
+
   it('routes login checks, failures, and clears through the Durable Object namespace', async () => {
     const namespace = new RecordingNamespace();
     const env = { RATE_LIMITER: namespace };

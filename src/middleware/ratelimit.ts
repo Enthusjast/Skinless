@@ -7,6 +7,9 @@ export const LOGIN_TURNSTILE_THRESHOLD = 3;
 export const REGISTRATION_WINDOW_MS = 60 * 60 * 1000;
 export const REGISTRATION_IP_LIMIT = 5;
 export const REGISTRATION_EMAIL_LIMIT = 3;
+export const ACCOUNT_CHALLENGE_WINDOW_MS = 60 * 60 * 1000;
+export const ACCOUNT_CHALLENGE_IP_LIMIT = 5;
+export const ACCOUNT_CHALLENGE_EMAIL_LIMIT = 3;
 
 const RATE_LIMITER_ENDPOINT = 'https://rate-limiter.internal/limit';
 const RATE_LIMITER_FAILURE_RETRY_MS = 60 * 1000;
@@ -175,5 +178,31 @@ export function recordRegistrationEmailAttempt(
     windowMs: REGISTRATION_WINDOW_MS,
     limit: REGISTRATION_EMAIL_LIMIT,
     blockMs: REGISTRATION_WINDOW_MS,
+  });
+}
+
+export function recordAccountChallengeIpAttempt(
+  env: RateLimiterEnvironment,
+  purpose: string,
+  clientKey: string,
+): Promise<RateLimitResponse> {
+  return requestRateLimit(env, `account:${purpose}:ip:${clientKey}`, {
+    action: 'record',
+    windowMs: ACCOUNT_CHALLENGE_WINDOW_MS,
+    limit: ACCOUNT_CHALLENGE_IP_LIMIT,
+    blockMs: ACCOUNT_CHALLENGE_WINDOW_MS,
+  });
+}
+
+export function recordAccountChallengeEmailAttempt(
+  env: RateLimiterEnvironment,
+  purpose: string,
+  email: string,
+): Promise<RateLimitResponse> {
+  return requestRateLimit(env, `account:${purpose}:email:${normalizeRateLimitEmail(email)}`, {
+    action: 'record',
+    windowMs: ACCOUNT_CHALLENGE_WINDOW_MS,
+    limit: ACCOUNT_CHALLENGE_EMAIL_LIMIT,
+    blockMs: ACCOUNT_CHALLENGE_WINDOW_MS,
   });
 }
