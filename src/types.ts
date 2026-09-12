@@ -3,6 +3,7 @@ import type { MailSender } from "./utils/mail";
 import type { AccountChallengePurpose } from "./utils/account";
 
 export type UserRole = "user" | "admin";
+export type UserStatus = "active" | "disabled" | "pending_deletion";
 export type SkinModel = "classic" | "slim";
 export type { RegistrationMode } from "./utils/registration";
 export type { AccountChallengePurpose } from "./utils/account";
@@ -48,7 +49,8 @@ export interface UserRecord {
   updated_at: number;
   default_profile_id?: string | null;
   email_verified_at?: number | null;
-  status?: "active" | "disabled";
+  status?: UserStatus;
+  deletion_requested_at?: number | null;
 }
 
 export interface ProfileRecord {

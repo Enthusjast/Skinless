@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { formatApiError } from '../api';
 import EmailChangeForm from '../components/EmailChangeForm.vue';
+import AccountDeletion from '../components/AccountDeletion.vue';
 import UiCard from '../components/common/UiCard.vue';
 import SessionManagement from '../components/SessionManagement.vue';
 import ProfileManagement from '../components/ProfileManagement.vue';
@@ -167,6 +168,7 @@ async function changePassword() {
         <p v-if="passwordError" class="form-error" role="alert">{{ passwordError }}</p>
         <EmailChangeForm />
         <SessionManagement />
+        <AccountDeletion />
       </UiCard>
     </div>
     <aside class="dashboard-side">

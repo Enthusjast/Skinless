@@ -92,6 +92,13 @@ export interface EmailChangeChallengeResponse {
   resendAfter: number;
 }
 
+export interface AccountDeletionResponse {
+  challengeId: string;
+  deletionAt: number;
+  restoreUntil: number;
+  status: 'pending_deletion';
+}
+
 export interface WebSession {
   id: string;
   deviceLabel: string;
@@ -556,6 +563,23 @@ export function completeEmailChange(
   return managementRequest<{ user: ApiUser }>('/api/user/email', {
     method: 'PUT',
     body: JSON.stringify({ challengeId, code, currentPassword }),
+  });
+}
+
+export function requestAccountDeletion(
+  currentPassword: string,
+  confirmation: string,
+): Promise<AccountDeletionResponse> {
+  return managementRequest<AccountDeletionResponse>('/api/user/deletion', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, confirmation }),
+  });
+}
+
+export function restoreAccount(email: string, code: string): Promise<void> {
+  return request<void>('/api/auth/account/restore', {
+    method: 'POST',
+    body: JSON.stringify({ email, code }),
   });
 }
 

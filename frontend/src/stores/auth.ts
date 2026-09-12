@@ -11,6 +11,7 @@ import {
   login as loginWithCookies,
   logout as logoutWithCookies,
   renameProfile,
+  requestAccountDeletion,
   resendEmailChange,
   resendPasswordReset,
   resendRegistration,
@@ -135,6 +136,10 @@ export const useAuthStore = defineStore('auth', {
       if (!this.user) throw new Error('Not authenticated');
       await changePassword(currentPassword, newPassword);
       this.clearSession();
+    },
+    async requestAccountDeletion(currentPassword: string, confirmation: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      return requestAccountDeletion(currentPassword, confirmation);
     },
     async upload(
       asset: 'skin' | 'cape',

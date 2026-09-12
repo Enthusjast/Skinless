@@ -1,8 +1,13 @@
-export type AccountChallengePurpose = 'password_reset' | 'email_change';
+export type AccountChallengePurpose = 'password_reset' | 'email_change' | 'account_restore';
+
+export const ACCOUNT_RESTORE_PURPOSE = 'account_restore' as const;
 
 export const ACCOUNT_CHALLENGE_CODE_TTL_MS = 10 * 60 * 1000;
 export const ACCOUNT_CHALLENGE_RESEND_DELAY_MS = 60 * 1000;
 export const ACCOUNT_CHALLENGE_MAX_ATTEMPTS = 5;
+export const ACCOUNT_DELETION_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+export const ACCOUNT_RESTORE_CODE_TTL_MS = ACCOUNT_DELETION_GRACE_PERIOD_MS;
+export const ACCOUNT_DELETION_CONFIRMATION = 'DELETE';
 export const PASSWORD_RESET_GENERIC_MESSAGE =
   'If an account exists for this email, a password reset code has been sent.';
 

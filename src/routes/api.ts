@@ -588,7 +588,13 @@ routes.post('/auth/login', async (c) => {
 
   const user = await findUserByEmail(c.env.DB, email);
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
-  if (!user || !passwordMatches || user.email_verified_at === null || user.status === 'disabled') {
+  if (
+    !user ||
+    !passwordMatches ||
+    user.email_verified_at === null ||
+    user.status === 'disabled' ||
+    user.status === 'pending_deletion'
+  ) {
     return jsonError(c, 401, 'Invalid email or password.', 'Unauthorized');
   }
 
@@ -644,7 +650,12 @@ routes.post('/auth/refresh', async (c) => {
 
   const user = await findUserById(c.env.DB, session.user_id);
   const profile = await findDefaultProfileByUserId(c.env.DB, session.user_id);
-  if (!user || !profile) {
+  if (
+    !user ||
+    user.status === 'disabled' ||
+    user.status === 'pending_deletion' ||
+    !profile
+  ) {
     await revokeWebSession(c.env.DB, session.id, Date.now());
     clearWebSessionCookies(c);
     return jsonError(c, 401, 'The web session is invalid or expired.', 'Unauthorized');

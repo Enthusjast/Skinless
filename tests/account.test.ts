@@ -3,6 +3,9 @@ import {
   ACCOUNT_CHALLENGE_CODE_TTL_MS,
   ACCOUNT_CHALLENGE_MAX_ATTEMPTS,
   ACCOUNT_CHALLENGE_RESEND_DELAY_MS,
+  ACCOUNT_DELETION_CONFIRMATION,
+  ACCOUNT_DELETION_GRACE_PERIOD_MS,
+  ACCOUNT_RESTORE_CODE_TTL_MS,
   generateVerificationCode,
   isSixDigitCode,
   isValidEmail,
@@ -23,6 +26,9 @@ describe('account challenge utilities', () => {
     expect(ACCOUNT_CHALLENGE_CODE_TTL_MS).toBe(10 * 60 * 1000);
     expect(ACCOUNT_CHALLENGE_RESEND_DELAY_MS).toBe(60 * 1000);
     expect(ACCOUNT_CHALLENGE_MAX_ATTEMPTS).toBe(5);
+    expect(ACCOUNT_DELETION_CONFIRMATION).toBe('DELETE');
+    expect(ACCOUNT_DELETION_GRACE_PERIOD_MS).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(ACCOUNT_RESTORE_CODE_TTL_MS).toBe(ACCOUNT_DELETION_GRACE_PERIOD_MS);
     expect(isSixDigitCode(code)).toBe(true);
   });
 });

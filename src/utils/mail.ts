@@ -5,6 +5,7 @@ export interface MailSender {
   sendVerificationCode(email: string, code: string): Promise<void>;
   sendPasswordResetCode?(email: string, code: string): Promise<void>;
   sendEmailChangeCode?(email: string, code: string): Promise<void>;
+  sendAccountRestoreCode?(email: string, code: string): Promise<void>;
 }
 
 export interface ResendMailOptions {
@@ -63,6 +64,18 @@ function emailChangeMessage(code: string): {
     subject: 'Confirm your new Skinless email',
     text: `Your Skinless email change code is ${code}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
     html: `<p>Your Skinless email change code is <strong>${code}</strong>.</p><p>It expires in 10 minutes. If you did not request this, you can ignore this email.</p>`,
+  };
+}
+
+function accountRestoreMessage(code: string): {
+  subject: string;
+  text: string;
+  html: string;
+} {
+  return {
+    subject: 'Restore your Skinless account',
+    text: `Your Skinless account restore code is ${code}. It is valid for 7 days. If you did not request account deletion, you can ignore this email.`,
+    html: `<p>Your Skinless account restore code is <strong>${code}</strong>.</p><p>It is valid for 7 days. If you did not request account deletion, you can ignore this email.</p>`,
   };
 }
 
@@ -129,6 +142,9 @@ export function createResendMailSender(options: ResendMailOptions): MailSender {
     },
     sendEmailChangeCode(email, code) {
       return sendMessage(email, emailChangeMessage(code), 'Email change');
+    },
+    sendAccountRestoreCode(email, code) {
+      return sendMessage(email, accountRestoreMessage(code), 'Account restore');
     },
   };
 }

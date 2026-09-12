@@ -13,6 +13,8 @@ import {
   isConstraintViolation,
   revokeOtherWebSessions,
   revokeUserWebSessions,
+  restoreAccount,
+  startAccountDeletion,
   updateAccountChallenge,
   upsertAccountChallenge,
 } from '../db/queries';
@@ -28,6 +30,10 @@ import {
   ACCOUNT_CHALLENGE_CODE_TTL_MS,
   ACCOUNT_CHALLENGE_MAX_ATTEMPTS,
   ACCOUNT_CHALLENGE_RESEND_DELAY_MS,
+  ACCOUNT_DELETION_CONFIRMATION,
+  ACCOUNT_DELETION_GRACE_PERIOD_MS,
+  ACCOUNT_RESTORE_CODE_TTL_MS,
+  ACCOUNT_RESTORE_PURPOSE,
   generateVerificationCode,
   isSixDigitCode,
   isValidEmail,
@@ -44,6 +50,7 @@ import {
 import { turnstileTokenFromBody, verifyTurnstileToken } from '../utils/turnstile';
 import { serializeUser } from '../utils/serializers';
 import { generateUserId } from '../utils/uuid';
+import { clearWebSessionCookies } from '../utils/session';
 import type { AppEnv } from '../types';
 
 interface PasswordResetStartInput {
@@ -73,6 +80,22 @@ interface EmailChangeInput extends EmailChangeStartInput {
   challengeId?: unknown;
   emailChangeId?: unknown;
   code?: unknown;
+}
+
+interface AccountDeletionInput {
+  currentPassword?: unknown;
+  current_password?: unknown;
+  confirmation?: unknown;
+  confirm?: unknown;
+  confirmText?: unknown;
+  turnstileToken?: unknown;
+}
+
+interface AccountRestoreInput {
+  email?: unknown;
+  challengeId?: unknown;
+  code?: unknown;
+  turnstileToken?: unknown;
 }
 
 const PASSWORD_RESET_PURPOSE = 'password_reset' as const;
@@ -186,6 +209,10 @@ async function deliverCode(
   }
   if (purpose === EMAIL_CHANGE_PURPOSE && sender.sendEmailChangeCode) {
     await sender.sendEmailChangeCode(email, code);
+    return;
+  }
+  if (purpose === ACCOUNT_RESTORE_PURPOSE && sender.sendAccountRestoreCode) {
+    await sender.sendAccountRestoreCode(email, code);
     return;
   }
   await sender.sendVerificationCode(email, code);
@@ -321,7 +348,11 @@ async function challengeRateLimit(
     429,
     'Too many requests. Try again later.',
     'TooManyRequests',
-    purpose === PASSWORD_RESET_PURPOSE ? 'password_reset_rate_limited' : 'email_change_rate_limited',
+    purpose === PASSWORD_RESET_PURPOSE
+      ? 'password_reset_rate_limited'
+      : purpose === EMAIL_CHANGE_PURPOSE
+        ? 'email_change_rate_limited'
+        : 'account_restore_rate_limited',
   );
   if (retryAfter > 0) response.headers.set('Retry-After', String(Math.ceil(retryAfter / 1000)));
   return response;
@@ -329,7 +360,13 @@ async function challengeRateLimit(
 
 async function turnstileError(
   c: Context<AppEnv>,
-  body: PasswordResetStartInput | PasswordResetInput | EmailChangeStartInput | EmailChangeInput,
+  body:
+    | PasswordResetStartInput
+    | PasswordResetInput
+    | EmailChangeStartInput
+    | EmailChangeInput
+    | AccountDeletionInput
+    | AccountRestoreInput,
   message: string,
 ): Promise<Response | null> {
   if (!c.env.TURNSTILE_SECRET_KEY?.trim()) return null;
@@ -372,6 +409,30 @@ async function emailChangeChallengeFromBody(
     : findAccountChallengeByUserAndPurpose(c.env.DB, userId, EMAIL_CHANGE_PURPOSE);
 }
 
+function deletionCurrentPasswordFromBody(body: AccountDeletionInput): string | null {
+  return asPassword(body.currentPassword ?? body.current_password);
+}
+
+function deletionConfirmationFromBody(body: AccountDeletionInput): string | null {
+  return asString(body.confirmation ?? body.confirm ?? body.confirmText);
+}
+
+async function restoreChallengeFromBody(
+  c: Context<AppEnv>,
+  body: AccountRestoreInput,
+) {
+  const challengeId = asString(body.challengeId);
+  if (challengeId) {
+    return findAccountChallengeById(c.env.DB, challengeId, ACCOUNT_RESTORE_PURPOSE);
+  }
+  const email = normalizeEmail(body.email);
+  if (!email) return null;
+  const user = await findUserByEmail(c.env.DB, email);
+  return user
+    ? findAccountChallengeByUserAndPurpose(c.env.DB, user.id, ACCOUNT_RESTORE_PURPOSE)
+    : null;
+}
+
 routes.post('/auth/password/reset/start', async (c) => {
   const body = await readJson<PasswordResetStartInput>(c);
   const email = normalizeEmail(body?.email);
@@ -386,7 +447,7 @@ routes.post('/auth/password/reset/start', async (c) => {
   const expiresAt = sentAt + ACCOUNT_CHALLENGE_CODE_TTL_MS;
   const challengeId = generateUserId();
   const user = await findUserByEmail(c.env.DB, email);
-  if (!user || user.status === 'disabled') {
+  if (!user || user.status === 'disabled' || user.status === 'pending_deletion') {
     return passwordResetResponse(c, challengeId, expiresAt, sentAt);
   }
 
@@ -485,6 +546,129 @@ routes.post('/auth/password/reset/verify', async (c) => {
   await deleteUserTokens(c.env.DB, challenge.user_id);
   await revokeUserWebSessions(c.env.DB, challenge.user_id, now);
   return c.body(null, 204);
+});
+
+routes.post('/user/deletion', authMiddleware, async (c) => {
+  const sessionError = requireCookieSession(c);
+  if (sessionError) return sessionError;
+
+  const body = await readJson<AccountDeletionInput>(c);
+  const currentPassword = deletionCurrentPasswordFromBody(body ?? {});
+  const confirmation = deletionConfirmationFromBody(body ?? {});
+  if (!currentPassword) return currentPasswordRequired(c);
+  if (confirmation !== ACCOUNT_DELETION_CONFIRMATION) {
+    return jsonError(
+      c,
+      400,
+      `Type ${ACCOUNT_DELETION_CONFIRMATION} to confirm account deletion.`,
+      'IllegalArgumentException',
+      'account_deletion_confirmation_required',
+    );
+  }
+
+  const user = c.get('user');
+  if (user.role === 'admin') {
+    return jsonError(
+      c,
+      403,
+      'Administrator account deletion is not available.',
+      'Forbidden',
+      'admin_deletion_not_allowed',
+    );
+  }
+  if (!await verifyPassword(currentPassword, user.salt, user.password)) {
+    return currentPasswordIncorrect(c);
+  }
+
+  const rateLimitError = await challengeRateLimit(c, ACCOUNT_RESTORE_PURPOSE, user.email);
+  if (rateLimitError) return rateLimitError;
+  const turnstileFailure = await turnstileError(
+    c,
+    body ?? {},
+    'Account deletion verification failed.',
+  );
+  if (turnstileFailure) return turnstileFailure;
+
+  const now = Date.now();
+  const deletionAt = now + ACCOUNT_DELETION_GRACE_PERIOD_MS;
+  const code = generateVerificationCode();
+  const deliveryError = await deliverManagedCode(c, ACCOUNT_RESTORE_PURPOSE, user.email, code);
+  if (deliveryError) return deliveryError;
+
+  const challengeId = generateUserId();
+  const started = await startAccountDeletion(c.env.DB, user.id, deletionAt, {
+    id: challengeId,
+    user_id: user.id,
+    purpose: ACCOUNT_RESTORE_PURPOSE,
+    email: user.email,
+    code_hash: await sha256Hex(new TextEncoder().encode(code)),
+    attempts: 0,
+    last_sent_at: now,
+    expires_at: now + ACCOUNT_RESTORE_CODE_TTL_MS,
+    created_at: now,
+    updated_at: now,
+  });
+  if (!started) {
+    return jsonError(
+      c,
+      409,
+      'The account is already pending deletion.',
+      'Conflict',
+      'account_deletion_already_pending',
+    );
+  }
+
+  await deleteUserTokens(c.env.DB, user.id);
+  await revokeUserWebSessions(c.env.DB, user.id, now);
+  clearWebSessionCookies(c);
+  return c.json({
+    challengeId,
+    deletionAt,
+    restoreUntil: deletionAt,
+    status: 'pending_deletion',
+  }, 202);
+});
+
+routes.post('/auth/account/restore', async (c) => {
+  const body = await readJson<AccountRestoreInput>(c);
+  const email = normalizeEmail(body?.email);
+  const code = asString(body?.code);
+  if (!email || !isValidEmail(email) || !code || !isSixDigitCode(code)) {
+    return invalidVerification(c);
+  }
+
+  const rateLimitError = await challengeRateLimit(c, ACCOUNT_RESTORE_PURPOSE, email);
+  if (rateLimitError) return rateLimitError;
+  const turnstileFailure = await turnstileError(
+    c,
+    body ?? {},
+    'Account recovery verification failed.',
+  );
+  if (turnstileFailure) return turnstileFailure;
+
+  const challenge = await restoreChallengeFromBody(c, body ?? {});
+  if (!challenge || challenge.email !== email) return invalidVerification(c);
+  const user = await findUserById(c.env.DB, challenge.user_id);
+  if (!user || user.status !== 'pending_deletion') return invalidVerification(c);
+
+  const now = Date.now();
+  if (challenge.expires_at <= now) return invalidVerification(c);
+  if (challenge.attempts >= ACCOUNT_CHALLENGE_MAX_ATTEMPTS) return attemptsExhausted(c);
+
+  const codeHash = await sha256Hex(new TextEncoder().encode(code));
+  if (!timingSafeEqual(codeHash, challenge.code_hash)) {
+    const incremented = await incrementAccountChallengeAttempts(
+      c.env.DB,
+      challenge.id,
+      ACCOUNT_RESTORE_PURPOSE,
+      now,
+      user.id,
+    );
+    return incremented ? invalidVerification(c) : attemptsExhausted(c);
+  }
+
+  const restored = await restoreAccount(c.env.DB, challenge, now);
+  return restored ? c.body(null, 204) : invalidVerification(c);
 });
 
 routes.post('/user/email/change/start', authMiddleware, async (c) => {

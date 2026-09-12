@@ -58,6 +58,10 @@ export interface PendingRegistrationContext extends PendingRegistrationRecord {
   challenge_updated_at: number;
 }
 
+export interface PendingDeletionUserRecord {
+  id: string;
+}
+
 export const MAX_PROFILES_PER_USER = 5;
 
 export interface TextureProfileReference {
@@ -94,6 +98,10 @@ export async function findProfileByUserId(
     .prepare(
       `SELECT * FROM profiles
        WHERE user_id = ?
+         AND EXISTS (
+           SELECT 1 FROM users
+           WHERE users.id = profiles.user_id AND users.status = 'active'
+         )
        ORDER BY created_at ASC, id ASC
        LIMIT 1`,
     )
@@ -106,6 +114,7 @@ export async function findDefaultProfileByUserId(
   userId: string,
 ): Promise<ProfileRecord | null> {
   const user = await findUserById(db, userId);
+  if (user?.status === 'disabled' || user?.status === 'pending_deletion') return null;
   if (user?.default_profile_id) {
     const profile = await findProfileById(db, user.default_profile_id);
     if (profile?.user_id === userId) return profile;
@@ -121,6 +130,10 @@ export async function listProfilesByUserId(
     .prepare(
       `SELECT * FROM profiles
        WHERE user_id = ?
+         AND EXISTS (
+           SELECT 1 FROM users
+           WHERE users.id = profiles.user_id AND users.status = 'active'
+         )
        ORDER BY created_at ASC, id ASC`,
     )
     .bind(userId)
@@ -133,7 +146,15 @@ export async function findProfileById(
   profileId: string,
 ): Promise<ProfileRecord | null> {
   return db
-    .prepare("SELECT * FROM profiles WHERE id = ? LIMIT 1")
+    .prepare(
+      `SELECT * FROM profiles
+       WHERE id = ?
+         AND EXISTS (
+           SELECT 1 FROM users
+           WHERE users.id = profiles.user_id AND users.status = 'active'
+         )
+       LIMIT 1`,
+    )
     .bind(profileId)
     .first<ProfileRecord>();
 }
@@ -154,7 +175,15 @@ export async function findProfileByIdForUser(
   userId: string,
 ): Promise<ProfileRecord | null> {
   return db
-    .prepare("SELECT * FROM profiles WHERE id = ? AND user_id = ? LIMIT 1")
+    .prepare(
+      `SELECT * FROM profiles
+       WHERE id = ? AND user_id = ?
+         AND EXISTS (
+           SELECT 1 FROM users
+           WHERE users.id = profiles.user_id AND users.status = 'active'
+         )
+       LIMIT 1`,
+    )
     .bind(profileId, userId)
     .first<ProfileRecord>();
 }
@@ -185,7 +214,7 @@ export async function findTokenContext(
        FROM tokens t
        INNER JOIN users u ON u.id = t.user_id
        INNER JOIN profiles p ON p.id = t.profile_id
-       WHERE t.access_token = ? AND t.expires_at > ?
+       WHERE t.access_token = ? AND t.expires_at > ? AND u.status = 'active'
        LIMIT 1`,
     )
     .bind(accessToken, now)
@@ -723,6 +752,168 @@ export async function completeEmailChange(
   return (userUpdate?.meta?.changes ?? 0) > 0;
 }
 
+export async function startAccountDeletion(
+  db: D1Database,
+  userId: string,
+  deletionRequestedAt: number,
+  challenge: AccountChallengeRecord,
+): Promise<boolean> {
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE users
+         SET status = 'pending_deletion', deletion_requested_at = ?, updated_at = ?
+         WHERE id = ? AND status = 'active' AND deletion_requested_at IS NULL`,
+      )
+      .bind(deletionRequestedAt, challenge.updated_at, userId),
+    db
+      .prepare(
+        `INSERT INTO account_challenges
+         (id, user_id, purpose, email, code_hash, attempts, last_sent_at, expires_at, created_at, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM users
+           WHERE id = ? AND status = 'pending_deletion' AND deletion_requested_at = ?
+         )
+         ON CONFLICT (user_id, purpose) DO UPDATE SET
+           email = excluded.email,
+           code_hash = excluded.code_hash,
+           attempts = excluded.attempts,
+           last_sent_at = excluded.last_sent_at,
+           expires_at = excluded.expires_at,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        challenge.id,
+        challenge.user_id,
+        challenge.purpose,
+        challenge.email,
+        challenge.code_hash,
+        challenge.attempts,
+        challenge.last_sent_at,
+        challenge.expires_at,
+        challenge.created_at,
+        challenge.updated_at,
+        userId,
+        deletionRequestedAt,
+      ),
+  ]);
+  const userUpdate = results[0] as { meta?: { changes?: number } } | undefined;
+  const challengeWrite = results[1] as { meta?: { changes?: number } } | undefined;
+  return (userUpdate?.meta?.changes ?? 0) > 0 && (challengeWrite?.meta?.changes ?? 0) > 0;
+}
+
+export async function restoreAccount(
+  db: D1Database,
+  challenge: Pick<AccountChallengeRecord, 'id' | 'user_id' | 'purpose'>,
+  restoredAt: number,
+): Promise<boolean> {
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE users
+         SET status = 'active', deletion_requested_at = NULL, updated_at = ?
+         WHERE id = ? AND status = 'pending_deletion' AND deletion_requested_at > ?
+           AND EXISTS (
+             SELECT 1 FROM account_challenges
+             WHERE id = ? AND user_id = ? AND purpose = ? AND expires_at > ?
+           )`,
+      )
+      .bind(
+        restoredAt,
+        challenge.user_id,
+        restoredAt,
+        challenge.id,
+        challenge.user_id,
+        challenge.purpose,
+        restoredAt,
+      ),
+    db
+      .prepare(
+        `DELETE FROM account_challenges
+         WHERE id = ? AND user_id = ? AND purpose = ? AND expires_at > ?
+           AND EXISTS (
+             SELECT 1 FROM users
+             WHERE id = ? AND status = 'active' AND deletion_requested_at IS NULL
+           )`,
+      )
+      .bind(
+        challenge.id,
+        challenge.user_id,
+        challenge.purpose,
+        restoredAt,
+        challenge.user_id,
+      ),
+  ]);
+  const userUpdate = results[0] as { meta?: { changes?: number } } | undefined;
+  return (userUpdate?.meta?.changes ?? 0) > 0;
+}
+
+export async function listExpiredPendingDeletions(
+  db: D1Database,
+  now: number,
+  limit: number,
+): Promise<PendingDeletionUserRecord[]> {
+  const result = await db
+    .prepare(
+      `SELECT id
+       FROM users
+       WHERE status = 'pending_deletion' AND deletion_requested_at <= ?
+       ORDER BY deletion_requested_at ASC, id ASC
+       LIMIT ?`,
+    )
+    .bind(now, limit)
+    .all<PendingDeletionUserRecord>();
+  return result.results;
+}
+
+export async function deleteExpiredPendingAccount(
+  db: D1Database,
+  userId: string,
+  now: number,
+  textureCleanupScheduledAt: number,
+): Promise<boolean> {
+  const pendingCondition = `EXISTS (
+    SELECT 1 FROM users
+    WHERE id = ? AND status = 'pending_deletion' AND deletion_requested_at <= ?
+  )`;
+  const results = await db.batch([
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO texture_cleanup
+         (hash, object_key, scheduled_at, attempts, last_error)
+         SELECT DISTINCT assets.asset_hash, assets.asset_hash || '.png', ?, 0, NULL
+         FROM (
+           SELECT skin_hash AS asset_hash FROM profiles WHERE user_id = ? AND skin_hash IS NOT NULL
+           UNION
+           SELECT cape_hash AS asset_hash FROM profiles WHERE user_id = ? AND cape_hash IS NOT NULL
+           UNION
+           SELECT hash AS asset_hash FROM texture_wardrobe WHERE user_id = ?
+         ) AS assets
+         WHERE ${pendingCondition}`,
+      )
+      .bind(textureCleanupScheduledAt, userId, userId, userId, userId, now),
+    db
+      .prepare(`DELETE FROM tokens WHERE user_id = ? AND ${pendingCondition}`)
+      .bind(userId, userId, now),
+    db
+      .prepare(
+        `UPDATE web_sessions
+         SET revoked_at = ?
+         WHERE user_id = ? AND revoked_at IS NULL AND ${pendingCondition}`,
+      )
+      .bind(now, userId, userId, now),
+    db
+      .prepare(
+        `DELETE FROM users
+         WHERE id = ? AND status = 'pending_deletion' AND deletion_requested_at <= ?`,
+      )
+      .bind(userId, now),
+  ]);
+  const userDelete = results[3] as { meta?: { changes?: number } } | undefined;
+  return (userDelete?.meta?.changes ?? 0) > 0;
+}
+
 export async function findSiteSettings(
   db: D1Database,
 ): Promise<SiteSettingsRecord | null> {
@@ -1190,6 +1381,7 @@ export async function findJoinedProfile(
       `SELECT p.*
        FROM server_sessions s
        INNER JOIN profiles p ON p.id = s.profile_id
+       INNER JOIN users u ON u.id = s.user_id AND u.status = 'active'
        WHERE s.server_id = ? AND p.name = ? AND s.expires_at > ?
        LIMIT 1`,
     )

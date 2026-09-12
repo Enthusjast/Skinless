@@ -12,13 +12,17 @@ const form = reactive({ email: '', password: '' });
 const error = ref('');
 const showPassword = ref(false);
 const notice = ref(
-  route.query.changed === '1'
-    ? '密码已更新，请使用新密码登录。'
-    : route.query.reset === '1'
-      ? '密码已重置，现在可以使用新密码登录。'
-      : route.query.registered === '1'
-        ? '账号创建成功，现在可以登录了。'
-        : '',
+  route.query.pending === '1'
+    ? '删除申请已提交。请在 7 天内使用邮箱中的恢复验证码撤销删除。'
+    : route.query.restored === '1'
+      ? '账号已恢复，请重新登录。'
+      : route.query.changed === '1'
+        ? '密码已更新，请使用新密码登录。'
+        : route.query.reset === '1'
+          ? '密码已重置，现在可以使用新密码登录。'
+          : route.query.registered === '1'
+            ? '账号创建成功，现在可以登录了。'
+            : '',
 );
 
 async function submit() {
@@ -95,6 +99,7 @@ async function submit() {
         </button>
       </form>
       <RouterLink to="/forgot-password" class="auth-link">忘记密码？通过邮箱重置</RouterLink>
+      <RouterLink to="/restore-account" class="auth-link">恢复待删除账号</RouterLink>
       <RouterLink to="/register" class="auth-link">还没有账号？立即注册</RouterLink>
     </section>
   </section>

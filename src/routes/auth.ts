@@ -121,7 +121,13 @@ routes.post('/authserver/authenticate', async (c) => {
   const email = username.toLowerCase();
   const user = await findUserByEmail(c.env.DB, email);
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
-  if (!user || !passwordMatches || user.email_verified_at === null || user.status === 'disabled') {
+  if (
+    !user ||
+    !passwordMatches ||
+    user.email_verified_at === null ||
+    user.status === 'disabled' ||
+    user.status === 'pending_deletion'
+  ) {
     return invalidCredentials(c);
   }
 

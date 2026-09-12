@@ -1835,6 +1835,35 @@ h3 {
 .session-error .button {
   margin-top: 10px;
 }
+.danger-zone {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+.danger-zone h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+}
+.danger-zone-icon {
+  color: var(--danger);
+}
+.danger-zone .section-description {
+  max-width: 70ch;
+}
+.danger-zone-form {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin-top: 20px;
+}
+.danger-zone-form .field {
+  flex: 1;
+  margin-top: 0;
+}
+.danger-zone-form .button {
+  flex: 0 0 auto;
+}
 .table-panel {
   padding: 0;
   overflow: hidden;
@@ -2376,6 +2405,10 @@ td select {
     display: grid;
     align-items: stretch;
   }
+  .danger-zone-form {
+    display: grid;
+    align-items: stretch;
+  }
   .profile-create-form {
     display: grid;
     align-items: stretch;
@@ -2388,6 +2421,9 @@ td select {
     justify-content: flex-start;
   }
   .inline-form .button {
+    width: 100%;
+  }
+  .danger-zone-form .button {
     width: 100%;
   }
   .session-actions {

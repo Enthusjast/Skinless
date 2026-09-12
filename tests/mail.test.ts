@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createResendMailSender } from '../src/utils/mail';
 
 describe('Resend mail adapter', () => {
-  it('uses purpose-specific messages for password reset and email change codes', async () => {
+  it('uses purpose-specific messages for password reset, email change, and restore codes', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(null, { status: 200 }));
     const sender = createResendMailSender({
       apiKey: 're_test_key',
@@ -12,6 +12,7 @@ describe('Resend mail adapter', () => {
 
     await sender.sendPasswordResetCode?.('player@example.com', '042731');
     await sender.sendEmailChangeCode?.('new@example.com', '731042');
+    await sender.sendAccountRestoreCode?.('restore@example.com', '123456');
 
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual(expect.objectContaining({
       subject: 'Reset your Skinless password',
@@ -22,6 +23,11 @@ describe('Resend mail adapter', () => {
       subject: 'Confirm your new Skinless email',
       to: ['new@example.com'],
       text: expect.stringContaining('731042'),
+    }));
+    expect(JSON.parse(String(fetch.mock.calls[2]?.[1]?.body))).toEqual(expect.objectContaining({
+      subject: 'Restore your Skinless account',
+      to: ['restore@example.com'],
+      text: expect.stringContaining('123456'),
     }));
   });
 
