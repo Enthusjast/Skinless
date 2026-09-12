@@ -1,6 +1,7 @@
 const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim();
 // An empty base URL intentionally keeps browser requests on the current origin.
 export const API_BASE_URL = configuredBaseUrl.replace(/\/+$/, '');
+export const TURNSTILE_SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY ?? '').trim();
 
 export interface ApiProfile {
   id: string;
@@ -226,10 +227,16 @@ export function register(
   });
 }
 
-export function login(email: string, password: string): Promise<WebAuthResponse> {
+export function login(
+  email: string,
+  password: string,
+  turnstileToken?: string,
+): Promise<WebAuthResponse> {
+  const body: { email: string; password: string; turnstileToken?: string } = { email, password };
+  if (turnstileToken?.trim()) body.turnstileToken = turnstileToken.trim();
   return managementRequest<WebAuthResponse>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify(body),
   });
 }
 

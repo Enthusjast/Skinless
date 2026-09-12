@@ -21,9 +21,16 @@ import {
   updateUserRole,
 } from '../db/queries';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
-import { getClientKey, isLoginAllowed, clearLoginFailures, recordLoginFailure } from '../middleware/ratelimit';
+import {
+  checkLoginLimit,
+  clearLoginFailuresDistributed,
+  getClientKey,
+  LOGIN_TURNSTILE_THRESHOLD,
+  recordLoginFailureDistributed,
+} from '../middleware/ratelimit';
 import { createSalt, hashPassword, sha256Hex, timingSafeEqual, verifyPassword } from '../utils/crypto';
 import { jsonError, readJson } from '../utils/errors';
+import { turnstileTokenFromBody, verifyTurnstileToken } from '../utils/turnstile';
 import { serializeProfile, serializeUser, serializeUserWithProfile } from '../utils/serializers';
 import { validatePng, type AssetKind } from '../utils/png';
 import { generateProfileId, generateUserId } from '../utils/uuid';
@@ -55,6 +62,7 @@ interface PasswordInput {
 interface WebLoginInput {
   email?: unknown;
   password?: unknown;
+  turnstileToken?: unknown;
 }
 
 interface RoleInput {
@@ -207,7 +215,8 @@ routes.post('/register', async (c) => {
 
 routes.post('/auth/login', async (c) => {
   const clientKey = getClientKey(c.req.raw);
-  if (!isLoginAllowed(clientKey)) {
+  const limit = await checkLoginLimit(c.env, clientKey);
+  if (!limit.allowed) {
     return jsonError(c, 429, 'Too many failed login attempts. Try again later.', 'TooManyRequests');
   }
 
@@ -217,10 +226,22 @@ routes.post('/auth/login', async (c) => {
   if (!email || !password) return jsonError(c, 400, 'email and password are required.');
   if (password.length > 256) return jsonError(c, 400, 'Password must be 256 characters or fewer.');
 
+  if (limit.failedCount >= LOGIN_TURNSTILE_THRESHOLD) {
+    const turnstileValid = await verifyTurnstileToken(
+      turnstileTokenFromBody(body),
+      c.env.TURNSTILE_SECRET_KEY,
+      { remoteIp: clientKey === 'unknown' ? undefined : clientKey },
+    );
+    if (!turnstileValid) {
+      await recordLoginFailureDistributed(c.env, clientKey);
+      return jsonError(c, 401, 'Invalid email or password.', 'Unauthorized');
+    }
+  }
+
   const user = await findUserByEmail(c.env.DB, email);
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
   if (!user || !passwordMatches) {
-    recordLoginFailure(clientKey);
+    await recordLoginFailureDistributed(c.env, clientKey);
     return jsonError(c, 401, 'Invalid email or password.', 'Unauthorized');
   }
 
@@ -250,7 +271,7 @@ routes.post('/auth/login', async (c) => {
   const accessExpiresAt = now + ACCESS_TOKEN_TTL_MS;
   const accessValue = await createAccessCookieValue({ sessionId, userId: user.id, expiresAt: accessExpiresAt }, secret);
   setWebSessionCookies(c, accessValue, `${sessionId}.${refreshSecret}`, csrfToken);
-  clearLoginFailures(clientKey);
+  await clearLoginFailuresDistributed(c.env, clientKey);
   return c.json({ user: serializeUser(user, profile), csrfToken });
 });
 

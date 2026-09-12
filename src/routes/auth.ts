@@ -10,10 +10,17 @@ import {
   insertToken,
   rotateToken,
 } from '../db/queries';
-import { getClientKey, isLoginAllowed, clearLoginFailures, recordLoginFailure } from '../middleware/ratelimit';
+import {
+  checkLoginLimit,
+  clearLoginFailuresDistributed,
+  getClientKey,
+  LOGIN_TURNSTILE_THRESHOLD,
+  recordLoginFailureDistributed,
+} from '../middleware/ratelimit';
 import { createAccessToken, verifyPassword } from '../utils/crypto';
 import { getTokenExpiryMs, metadata } from '../utils/config';
 import { readJson, yggError } from '../utils/errors';
+import { turnstileTokenFromBody, verifyTurnstileToken } from '../utils/turnstile';
 import type { AppEnv, ProfileRecord, TokenRecord, UserRecord } from '../types';
 
 interface AuthenticateRequest {
@@ -21,6 +28,7 @@ interface AuthenticateRequest {
   password?: unknown;
   clientToken?: unknown;
   requestUser?: unknown;
+  turnstileToken?: unknown;
 }
 
 interface TokenRequest {
@@ -84,7 +92,8 @@ async function readTokenContext(c: Context<AppEnv>, body: TokenRequest) {
 
 routes.post('/authserver/authenticate', async (c) => {
   const clientKey = getClientKey(c.req.raw);
-  if (!isLoginAllowed(clientKey)) {
+  const limit = await checkLoginLimit(c.env, clientKey);
+  if (!limit.allowed) {
     return yggError(c, 403, 'Too many failed login attempts. Try again later.');
   }
 
@@ -94,11 +103,23 @@ routes.post('/authserver/authenticate', async (c) => {
   if (!username || !password) return yggError(c, 400, 'username and password are required.');
   if (password.length > 256) return yggError(c, 400, 'password must be 256 characters or fewer.');
 
+  if (limit.failedCount >= LOGIN_TURNSTILE_THRESHOLD) {
+    const turnstileValid = await verifyTurnstileToken(
+      turnstileTokenFromBody(body),
+      c.env.TURNSTILE_SECRET_KEY,
+      { remoteIp: clientKey === 'unknown' ? undefined : clientKey },
+    );
+    if (!turnstileValid) {
+      await recordLoginFailureDistributed(c.env, clientKey);
+      return invalidCredentials(c);
+    }
+  }
+
   const email = username.toLowerCase();
   const user = await findUserByEmail(c.env.DB, email);
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
   if (!user || !passwordMatches) {
-    recordLoginFailure(clientKey);
+    await recordLoginFailureDistributed(c.env, clientKey);
     return invalidCredentials(c);
   }
 
@@ -115,7 +136,7 @@ routes.post('/authserver/authenticate', async (c) => {
     expires_at: now + getTokenExpiryMs(c),
   };
   await insertToken(c.env.DB, token);
-  clearLoginFailures(clientKey);
+  await clearLoginFailuresDistributed(c.env, clientKey);
   return c.json(tokenResponse(token, profile, user, body?.requestUser === true));
 });
 
@@ -175,7 +196,8 @@ routes.post('/authserver/invalidate', async (c) => {
 
 routes.post('/authserver/signout', async (c) => {
   const clientKey = getClientKey(c.req.raw);
-  if (!isLoginAllowed(clientKey)) {
+  const limit = await checkLoginLimit(c.env, clientKey);
+  if (!limit.allowed) {
     return yggError(c, 403, 'Too many failed login attempts. Try again later.');
   }
   const body = await readJson<AuthenticateRequest>(c);
@@ -187,12 +209,12 @@ routes.post('/authserver/signout', async (c) => {
   const user = await findUserByEmail(c.env.DB, username.toLowerCase());
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
   if (!user || !passwordMatches) {
-    recordLoginFailure(clientKey);
+    await recordLoginFailureDistributed(c.env, clientKey);
     return invalidCredentials(c);
   }
 
   await deleteUserTokens(c.env.DB, user.id);
-  clearLoginFailures(clientKey);
+  await clearLoginFailuresDistributed(c.env, clientKey);
   return c.body(null, 204);
 });
 

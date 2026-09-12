@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { clearLoginFailures } from '../src/middleware/ratelimit';
 import { hashPassword } from '../src/utils/crypto';
+import { createTestRateLimiterNamespace } from './fixtures/rate-limiter';
 import type { ProfileRecord, UserRecord, WebSessionRecord } from '../src/types';
 
 type Row = Record<string, unknown>;
@@ -162,6 +163,7 @@ async function createEnv(): Promise<{ db: SessionD1; env: Record<string, unknown
     env: {
       DB: db,
       BUCKET: {},
+      RATE_LIMITER: createTestRateLimiterNamespace(),
       WEB_SESSION_SECRET: 'web-session-test-secret',
       API_BASE_URL: 'https://skin.example.com',
       SKIN_DOMAIN: 'skin.example.com',
@@ -185,6 +187,7 @@ function cookieHeader(setCookie: string): string {
 
 describe('secure web sessions', () => {
   beforeEach(() => clearLoginFailures());
+  afterEach(() => vi.unstubAllGlobals());
 
   it('logs in with a generic user response and exact secure cookie attributes', async () => {
     const { db, env } = await createEnv();
@@ -218,6 +221,57 @@ describe('secure web sessions', () => {
     expect(setCookie).toContain('SameSite=Strict');
     expect(setCookie).toContain('Path=/');
     expect(setCookie).toContain('skinless_csrf=');
+  });
+
+  it('keeps unknown-user failures generic and requires Turnstile after three failures', async () => {
+    const first = await createEnv();
+    const knownFailure = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.40' },
+      body: JSON.stringify({ email: user.email, password: 'wrong-password' }),
+    }, first.env);
+    const unknownFailure = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.41' },
+      body: JSON.stringify({ email: 'missing@example.com', password: 'wrong-password' }),
+    }, first.env);
+    expect(knownFailure.status).toBe(401);
+    expect(unknownFailure.status).toBe(401);
+    expect(await knownFailure.json()).toEqual(await unknownFailure.json());
+
+    const second = await createEnv();
+    second.env.TURNSTILE_SECRET_KEY = 'turnstile-secret';
+    const headers = { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.42' };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email: user.email, password: 'wrong-password' }),
+      }, second.env);
+      expect(response.status).toBe(401);
+    }
+
+    const missingToken = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ email: user.email, password: 'correct-password' }),
+    }, second.env);
+    expect(missingToken.status).toBe(401);
+    await expect(missingToken.json()).resolves.toEqual({
+      error: 'Unauthorized',
+      errorMessage: 'Invalid email or password.',
+      errorCode: 'unauthorized',
+    });
+
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    ));
+    const validToken = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ email: user.email, password: 'correct-password', turnstileToken: 'valid-token' }),
+    }, second.env);
+    expect(validToken.status).toBe(200);
   });
 
   it('authenticates management requests with the access cookie and rejects missing CSRF', async () => {

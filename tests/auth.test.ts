@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { hashPassword } from '../src/utils/crypto';
 import { clearLoginFailures } from '../src/middleware/ratelimit';
+import { createTestRateLimiterNamespace } from './fixtures/rate-limiter';
 import type { ProfileRecord, TokenRecord, UserRecord } from '../src/types';
 
 type Row = Record<string, unknown>;
@@ -137,6 +138,7 @@ async function createEnv(): Promise<{ db: FakeD1; env: Record<string, unknown> }
     env: {
       DB: db,
       BUCKET: {},
+      RATE_LIMITER: createTestRateLimiterNamespace(),
       API_BASE_URL: 'https://skin.example.com',
       SKIN_DOMAIN: 'skin.example.com',
     },
@@ -145,6 +147,7 @@ async function createEnv(): Promise<{ db: FakeD1; env: Record<string, unknown> }
 
 describe('Yggdrasil authentication API', () => {
   beforeEach(() => clearLoginFailures());
+  afterEach(() => vi.unstubAllGlobals());
 
   it('serves metadata under the configured API root', async () => {
     const { env } = await createEnv();
@@ -219,5 +222,53 @@ describe('Yggdrasil authentication API', () => {
       body: JSON.stringify({ username: 'player@example.com' }),
     }, env);
     expect(malformed.status).toBe(400);
+  });
+
+  it('keeps unknown-user failures generic and requires Turnstile after three failures', async () => {
+    const first = await createEnv();
+    const knownFailure = await app.request('/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.30' },
+      body: JSON.stringify({ username: user.email, password: 'wrong-password' }),
+    }, first.env);
+    const unknownFailure = await app.request('/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.31' },
+      body: JSON.stringify({ username: 'missing@example.com', password: 'wrong-password' }),
+    }, first.env);
+    expect(await knownFailure.json()).toEqual(await unknownFailure.json());
+
+    const second = await createEnv();
+    second.env.TURNSTILE_SECRET_KEY = 'turnstile-secret';
+    const headers = { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.32' };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await app.request('/authserver/authenticate', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ username: user.email, password: 'wrong-password' }),
+      }, second.env);
+      expect(response.status).toBe(403);
+    }
+
+    const missingToken = await app.request('/authserver/authenticate', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ username: user.email, password: 'correct-password' }),
+    }, second.env);
+    expect(missingToken.status).toBe(403);
+    await expect(missingToken.json()).resolves.toEqual({
+      error: 'ForbiddenOperationException',
+      errorMessage: 'Invalid credentials. Invalid username or password.',
+    });
+
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    ));
+    const validToken = await app.request('/authserver/authenticate', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ username: user.email, password: 'correct-password', turnstileToken: 'valid-token' }),
+    }, second.env);
+    expect(validToken.status).toBe(200);
   });
 });

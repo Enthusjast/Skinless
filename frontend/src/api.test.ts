@@ -3,6 +3,7 @@ import {
   ApiError,
   changePassword,
   formatApiError,
+  login,
   refreshSession,
   register,
   setCsrfToken,
@@ -169,6 +170,29 @@ describe('management session requests', () => {
       message: 'still expired',
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('adaptive Turnstile login payloads', () => {
+  it('includes a supplied Turnstile token without requiring one by default', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ user: {}, csrfToken: 'csrf-token' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await login('player@example.com', 'password', 'turnstile-token');
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      email: 'player@example.com',
+      password: 'password',
+      turnstileToken: 'turnstile-token',
+    });
   });
 });
 

@@ -8,6 +8,8 @@ import { corsMiddleware } from './middleware/cors';
 import { securityHeadersMiddleware } from './middleware/security';
 import { metadata } from './utils/config';
 
+export { RateLimiterDurableObject } from './durable-objects/rate-limiter';
+
 export const app = new Hono<AppEnv>();
 
 function isManagementApiPath(path: string): boolean {

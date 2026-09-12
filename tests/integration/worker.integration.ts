@@ -318,4 +318,59 @@ describe('Cloudflare runtime integration', () => {
       .all<{ server_id: string }>();
     expect(sessionRows.results).toEqual([{ server_id: 'live-server' }]);
   });
+
+  it('uses a real isolated Durable Object for atomic windows and block expiry', async () => {
+    if (!env.RATE_LIMITER) throw new Error('RATE_LIMITER binding unavailable in integration pool');
+
+    interface LimitResult {
+      allowed: boolean;
+      blocked: boolean;
+      retryAfter: number;
+      failedCount: number;
+    }
+
+    const namespace = env.RATE_LIMITER;
+    const concurrentStub = namespace.get(namespace.idFromName(`integration-concurrent-${crypto.randomUUID()}`));
+    const concurrentConfig = { windowMs: 60 * 60 * 1000, limit: 100, blockMs: 60 * 60 * 1000 };
+    const call = async (
+      stub: DurableObjectStub,
+      input: { action: 'check' | 'record'; now: number; windowMs: number; limit: number; blockMs: number },
+    ): Promise<LimitResult> => {
+      const response = await stub.fetch('https://rate-limiter.test/limit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      expect(response.status).toBe(200);
+      return response.json() as Promise<LimitResult>;
+    };
+
+    const concurrentResults = await Promise.all(
+      Array.from({ length: 20 }, (_, index) => call(concurrentStub, {
+        action: 'record',
+        now: 100_000 + index,
+        ...concurrentConfig,
+      })),
+    );
+    expect(concurrentResults.map((result) => result.failedCount).sort((left, right) => left - right)).toEqual(
+      Array.from({ length: 20 }, (_, index) => index + 1),
+    );
+
+    const blockStub = namespace.get(namespace.idFromName(`integration-block-${crypto.randomUUID()}`));
+    const loginConfig = { windowMs: 15 * 60 * 1000, limit: 5, blockMs: 15 * 60 * 1000 };
+    for (let index = 0; index < 5; index += 1) {
+      await call(blockStub, { action: 'record', now: 200_000 + index, ...loginConfig });
+    }
+    await expect(call(blockStub, { action: 'check', now: 200_005, ...loginConfig })).resolves.toEqual({
+      allowed: false,
+      blocked: true,
+      retryAfter: loginConfig.blockMs - 1,
+      failedCount: 5,
+    });
+    await expect(call(blockStub, {
+      action: 'check',
+      now: 200_004 + loginConfig.blockMs,
+      ...loginConfig,
+    })).resolves.toEqual({ allowed: true, blocked: false, retryAfter: 0, failedCount: 0 });
+  });
 });

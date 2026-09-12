@@ -42,10 +42,10 @@ export const useAuthStore = defineStore('auth', {
         this.clearSession();
       }
     },
-    async login(email: string, password: string) {
+    async login(email: string, password: string, turnstileToken?: string) {
       this.loading = true;
       try {
-        const session = await loginWithCookies(email, password);
+        const session = await loginWithCookies(email, password, turnstileToken);
         setCsrfToken(session.csrfToken);
         this.user = session.user;
       } catch (cause) {

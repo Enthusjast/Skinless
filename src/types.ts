@@ -11,6 +11,8 @@ export interface Bindings {
   SERVER_NAME?: string;
   IMPLEMENTATION_VERSION?: string;
   WEB_SESSION_SECRET?: string;
+  RATE_LIMITER: DurableObjectNamespace;
+  TURNSTILE_SECRET_KEY?: string;
 }
 
 export interface Variables {
