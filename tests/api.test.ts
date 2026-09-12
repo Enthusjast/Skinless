@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/index';
 import { clearLoginFailures } from '../src/middleware/ratelimit';
+import { hashPassword } from '../src/utils/crypto';
 import type { ProfileRecord, TokenRecord, UserRecord } from '../src/types';
 import type { TextureWardrobeRecord } from '../src/utils/wardrobe';
 
@@ -295,8 +296,27 @@ async function registeredClient() {
   const db = new MemoryD1();
   const bucket = new MemoryBucket();
   const env = { DB: db as unknown as D1Database, BUCKET: bucket as unknown as R2Bucket, API_BASE_URL: 'https://skin.example.com', SKIN_DOMAIN: 'skin.example.com' };
-  const register = await app.request('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'player@example.com', password: 'correct-password', name: 'PlayerOne' }) }, env);
-  expect(register.status).toBe(201);
+  const user: UserRecord = {
+    id: 'user-1',
+    email: 'player@example.com',
+    password: await hashPassword('correct-password', 'fixture-salt'),
+    salt: 'fixture-salt',
+    role: 'user',
+    created_at: 1,
+    updated_at: 1,
+    default_profile_id: 'profile-1',
+    email_verified_at: 1,
+    status: 'active',
+  };
+  db.users.set(user.id, user);
+  db.profiles.set('profile-1', {
+    id: 'profile-1',
+    user_id: user.id,
+    name: 'PlayerOne',
+    skin_hash: null,
+    cape_hash: null,
+    skin_model: 'classic',
+  });
   const login = await app.request('/authserver/authenticate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'player@example.com', password: 'correct-password', clientToken: 'client-1' }) }, env);
   const loginBody = await login.json() as { accessToken: string };
   return { db, bucket, env, token: loginBody.accessToken };

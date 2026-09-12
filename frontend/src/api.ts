@@ -68,6 +68,16 @@ export interface WebAuthResponse extends ProfileCollection {
   csrfToken: string;
 }
 
+export interface RegistrationStartResponse {
+  challengeId: string;
+  expiresAt: number;
+  resendAfter: number;
+}
+
+export interface RegistrationVerifyResponse {
+  user: ApiUser;
+}
+
 export interface WebSession {
   id: string;
   deviceLabel: string;
@@ -278,14 +288,50 @@ export function invalidate(accessToken: string, clientToken: string): Promise<vo
   });
 }
 
+export function startRegistration(
+  email: string,
+  password: string,
+  name: string,
+  inviteCode?: string,
+  turnstileToken?: string,
+): Promise<RegistrationStartResponse> {
+  const body: {
+    email: string;
+    password: string;
+    name: string;
+    inviteCode?: string;
+    turnstileToken?: string;
+  } = { email, password, name };
+  if (inviteCode?.trim()) body.inviteCode = inviteCode.trim();
+  if (turnstileToken?.trim()) body.turnstileToken = turnstileToken.trim();
+  return request<RegistrationStartResponse>('/api/auth/register/start', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export function register(
   email: string,
   password: string,
   name: string,
-): Promise<{ user: ApiUser }> {
-  return managementRequest<{ user: ApiUser }>('/api/register', {
+): Promise<RegistrationStartResponse> {
+  return startRegistration(email, password, name);
+}
+
+export function verifyRegistration(
+  challengeId: string,
+  code: string,
+): Promise<RegistrationVerifyResponse> {
+  return request<RegistrationVerifyResponse>('/api/auth/register/verify', {
     method: 'POST',
-    body: JSON.stringify({ email, password, name }),
+    body: JSON.stringify({ challengeId, code }),
+  });
+}
+
+export function resendRegistration(challengeId: string): Promise<RegistrationStartResponse> {
+  return request<RegistrationStartResponse>('/api/auth/register/resend', {
+    method: 'POST',
+    body: JSON.stringify({ challengeId }),
   });
 }
 

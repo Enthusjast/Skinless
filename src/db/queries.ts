@@ -5,12 +5,14 @@ import type {
   UserRole,
   UserWithProfile,
   SkinModel,
+  PendingRegistrationRecord,
+  RegistrationChallengeRecord,
   RegistrationInviteRecord,
   SiteSettingsRecord,
   WebSessionRecord,
-} from '../types';
-import type { RegistrationSettingsValues } from '../utils/registration';
-import type { TextureType, TextureWardrobeRecord } from '../utils/wardrobe';
+} from "../types";
+import type { RegistrationSettingsValues } from "../utils/registration";
+import type { TextureType, TextureWardrobeRecord } from "../utils/wardrobe";
 
 export interface TokenContextRow extends TokenRecord {
   user_email: string;
@@ -40,6 +42,16 @@ export interface WebSessionSummary {
   last_used_at: number;
 }
 
+export interface PendingRegistrationContext extends PendingRegistrationRecord {
+  challenge_id: string;
+  code_hash: string;
+  attempts: number;
+  last_sent_at: number;
+  challenge_expires_at: number;
+  challenge_created_at: number;
+  challenge_updated_at: number;
+}
+
 export const MAX_PROFILES_PER_USER = 5;
 
 export interface TextureProfileReference {
@@ -48,15 +60,30 @@ export interface TextureProfileReference {
   asset: TextureType;
 }
 
-export async function findUserByEmail(db: D1Database, email: string): Promise<UserRecord | null> {
-  return db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first<UserRecord>();
+export async function findUserByEmail(
+  db: D1Database,
+  email: string,
+): Promise<UserRecord | null> {
+  return db
+    .prepare("SELECT * FROM users WHERE email = ? LIMIT 1")
+    .bind(email)
+    .first<UserRecord>();
 }
 
-export async function findUserById(db: D1Database, id: string): Promise<UserRecord | null> {
-  return db.prepare('SELECT * FROM users WHERE id = ? LIMIT 1').bind(id).first<UserRecord>();
+export async function findUserById(
+  db: D1Database,
+  id: string,
+): Promise<UserRecord | null> {
+  return db
+    .prepare("SELECT * FROM users WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<UserRecord>();
 }
 
-export async function findProfileByUserId(db: D1Database, userId: string): Promise<ProfileRecord | null> {
+export async function findProfileByUserId(
+  db: D1Database,
+  userId: string,
+): Promise<ProfileRecord | null> {
   return db
     .prepare(
       `SELECT * FROM profiles
@@ -68,7 +95,10 @@ export async function findProfileByUserId(db: D1Database, userId: string): Promi
     .first<ProfileRecord>();
 }
 
-export async function findDefaultProfileByUserId(db: D1Database, userId: string): Promise<ProfileRecord | null> {
+export async function findDefaultProfileByUserId(
+  db: D1Database,
+  userId: string,
+): Promise<ProfileRecord | null> {
   const user = await findUserById(db, userId);
   if (user?.default_profile_id) {
     const profile = await findProfileById(db, user.default_profile_id);
@@ -77,7 +107,10 @@ export async function findDefaultProfileByUserId(db: D1Database, userId: string)
   return findProfileByUserId(db, userId);
 }
 
-export async function listProfilesByUserId(db: D1Database, userId: string): Promise<ProfileRecord[]> {
+export async function listProfilesByUserId(
+  db: D1Database,
+  userId: string,
+): Promise<ProfileRecord[]> {
   const result = await db
     .prepare(
       `SELECT * FROM profiles
@@ -89,13 +122,22 @@ export async function listProfilesByUserId(db: D1Database, userId: string): Prom
   return result.results;
 }
 
-export async function findProfileById(db: D1Database, profileId: string): Promise<ProfileRecord | null> {
-  return db.prepare('SELECT * FROM profiles WHERE id = ? LIMIT 1').bind(profileId).first<ProfileRecord>();
+export async function findProfileById(
+  db: D1Database,
+  profileId: string,
+): Promise<ProfileRecord | null> {
+  return db
+    .prepare("SELECT * FROM profiles WHERE id = ? LIMIT 1")
+    .bind(profileId)
+    .first<ProfileRecord>();
 }
 
-export async function findProfileByName(db: D1Database, name: string): Promise<ProfileRecord | null> {
+export async function findProfileByName(
+  db: D1Database,
+  name: string,
+): Promise<ProfileRecord | null> {
   return db
-    .prepare('SELECT * FROM profiles WHERE name = ? COLLATE NOCASE LIMIT 1')
+    .prepare("SELECT * FROM profiles WHERE name = ? COLLATE NOCASE LIMIT 1")
     .bind(name)
     .first<ProfileRecord>();
 }
@@ -106,14 +148,17 @@ export async function findProfileByIdForUser(
   userId: string,
 ): Promise<ProfileRecord | null> {
   return db
-    .prepare('SELECT * FROM profiles WHERE id = ? AND user_id = ? LIMIT 1')
+    .prepare("SELECT * FROM profiles WHERE id = ? AND user_id = ? LIMIT 1")
     .bind(profileId, userId)
     .first<ProfileRecord>();
 }
 
-export async function countProfilesByUserId(db: D1Database, userId: string): Promise<number> {
+export async function countProfilesByUserId(
+  db: D1Database,
+  userId: string,
+): Promise<number> {
   const row = await db
-    .prepare('SELECT COUNT(*) AS count FROM profiles WHERE user_id = ?')
+    .prepare("SELECT COUNT(*) AS count FROM profiles WHERE user_id = ?")
     .bind(userId)
     .first<{ count: number }>();
   return Number(row?.count ?? 0);
@@ -152,7 +197,15 @@ export async function insertUserAndProfile(
         `INSERT INTO users (id, email, password, salt, role, created_at, updated_at, default_profile_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
       )
-      .bind(user.id, user.email, user.password, user.salt, user.role, user.created_at, user.updated_at),
+      .bind(
+        user.id,
+        user.email,
+        user.password,
+        user.salt,
+        user.role,
+        user.created_at,
+        user.updated_at,
+      ),
     db
       .prepare(
         `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
@@ -169,7 +222,9 @@ export async function insertUserAndProfile(
         profile.updated_at ?? user.updated_at,
       ),
     db
-      .prepare('UPDATE users SET default_profile_id = ? WHERE id = ? AND default_profile_id IS NULL')
+      .prepare(
+        "UPDATE users SET default_profile_id = ? WHERE id = ? AND default_profile_id IS NULL",
+      )
       .bind(profile.id, user.id),
   ]);
 }
@@ -208,7 +263,10 @@ export async function updateProfileName(
   name: string,
   updatedAt: number,
 ): Promise<void> {
-  await db.prepare('UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?').bind(name, updatedAt, profileId).run();
+  await db
+    .prepare("UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?")
+    .bind(name, updatedAt, profileId)
+    .run();
 }
 
 export async function setDefaultProfile(
@@ -230,12 +288,22 @@ export async function setDefaultProfile(
   return (result.meta?.changes ?? 1) > 0;
 }
 
-export async function deleteProfile(db: D1Database, profileId: string, userId: string): Promise<boolean> {
-  const result = await db.prepare('DELETE FROM profiles WHERE id = ? AND user_id = ?').bind(profileId, userId).run();
+export async function deleteProfile(
+  db: D1Database,
+  profileId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = await db
+    .prepare("DELETE FROM profiles WHERE id = ? AND user_id = ?")
+    .bind(profileId, userId)
+    .run();
   return (result.meta?.changes ?? 1) > 0;
 }
 
-export async function insertToken(db: D1Database, token: TokenRecord): Promise<void> {
+export async function insertToken(
+  db: D1Database,
+  token: TokenRecord,
+): Promise<void> {
   await db
     .prepare(
       `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
@@ -252,9 +320,13 @@ export async function insertToken(db: D1Database, token: TokenRecord): Promise<v
     .run();
 }
 
-export async function rotateToken(db: D1Database, previous: string, token: TokenRecord): Promise<void> {
+export async function rotateToken(
+  db: D1Database,
+  previous: string,
+  token: TokenRecord,
+): Promise<void> {
   await db.batch([
-    db.prepare('DELETE FROM tokens WHERE access_token = ?').bind(previous),
+    db.prepare("DELETE FROM tokens WHERE access_token = ?").bind(previous),
     db
       .prepare(
         `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
@@ -271,15 +343,27 @@ export async function rotateToken(db: D1Database, previous: string, token: Token
   ]);
 }
 
-export async function deleteToken(db: D1Database, accessToken: string): Promise<void> {
-  await db.prepare('DELETE FROM tokens WHERE access_token = ?').bind(accessToken).run();
+export async function deleteToken(
+  db: D1Database,
+  accessToken: string,
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM tokens WHERE access_token = ?")
+    .bind(accessToken)
+    .run();
 }
 
-export async function deleteUserTokens(db: D1Database, userId: string): Promise<void> {
-  await db.prepare('DELETE FROM tokens WHERE user_id = ?').bind(userId).run();
+export async function deleteUserTokens(
+  db: D1Database,
+  userId: string,
+): Promise<void> {
+  await db.prepare("DELETE FROM tokens WHERE user_id = ?").bind(userId).run();
 }
 
-export async function insertWebSession(db: D1Database, session: WebSessionRecord): Promise<void> {
+export async function insertWebSession(
+  db: D1Database,
+  session: WebSessionRecord,
+): Promise<void> {
   await db
     .prepare(
       `INSERT INTO web_sessions
@@ -300,8 +384,14 @@ export async function insertWebSession(db: D1Database, session: WebSessionRecord
     .run();
 }
 
-export async function findWebSessionById(db: D1Database, id: string): Promise<WebSessionRecord | null> {
-  return db.prepare('SELECT * FROM web_sessions WHERE id = ? LIMIT 1').bind(id).first<WebSessionRecord>();
+export async function findWebSessionById(
+  db: D1Database,
+  id: string,
+): Promise<WebSessionRecord | null> {
+  return db
+    .prepare("SELECT * FROM web_sessions WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<WebSessionRecord>();
 }
 
 export async function rotateWebSession(
@@ -323,19 +413,50 @@ export async function rotateWebSession(
   return (result.meta?.changes ?? 1) > 0;
 }
 
-export async function touchWebSession(db: D1Database, id: string, lastUsedAt: number): Promise<void> {
-  await db.prepare('UPDATE web_sessions SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL').bind(lastUsedAt, id).run();
+export async function touchWebSession(
+  db: D1Database,
+  id: string,
+  lastUsedAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE web_sessions SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL",
+    )
+    .bind(lastUsedAt, id)
+    .run();
 }
 
-export async function revokeWebSession(db: D1Database, id: string, revokedAt: number): Promise<void> {
-  await db.prepare('UPDATE web_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(revokedAt, id).run();
+export async function revokeWebSession(
+  db: D1Database,
+  id: string,
+  revokedAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE web_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+    )
+    .bind(revokedAt, id)
+    .run();
 }
 
-export async function revokeUserWebSessions(db: D1Database, userId: string, revokedAt: number): Promise<void> {
-  await db.prepare('UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').bind(revokedAt, userId).run();
+export async function revokeUserWebSessions(
+  db: D1Database,
+  userId: string,
+  revokedAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+    )
+    .bind(revokedAt, userId)
+    .run();
 }
 
-export async function listWebSessions(db: D1Database, userId: string, now = Date.now()): Promise<WebSessionSummary[]> {
+export async function listWebSessions(
+  db: D1Database,
+  userId: string,
+  now = Date.now(),
+): Promise<WebSessionSummary[]> {
   const result = await db
     .prepare(
       `SELECT id, device_label, created_at, last_used_at
@@ -348,8 +469,12 @@ export async function listWebSessions(db: D1Database, userId: string, now = Date
   return result.results;
 }
 
-export async function findSiteSettings(db: D1Database): Promise<SiteSettingsRecord | null> {
-  return db.prepare('SELECT * FROM site_settings WHERE id = 1 LIMIT 1').first<SiteSettingsRecord>();
+export async function findSiteSettings(
+  db: D1Database,
+): Promise<SiteSettingsRecord | null> {
+  return db
+    .prepare("SELECT * FROM site_settings WHERE id = 1 LIMIT 1")
+    .first<SiteSettingsRecord>();
 }
 
 export async function updateSiteSettings(
@@ -403,7 +528,20 @@ export async function findRegistrationInviteById(
   db: D1Database,
   id: string,
 ): Promise<RegistrationInviteRecord | null> {
-  return db.prepare('SELECT * FROM registration_invites WHERE id = ? LIMIT 1').bind(id).first<RegistrationInviteRecord>();
+  return db
+    .prepare("SELECT * FROM registration_invites WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<RegistrationInviteRecord>();
+}
+
+export async function findRegistrationInviteByCodeHash(
+  db: D1Database,
+  codeHash: string,
+): Promise<RegistrationInviteRecord | null> {
+  return db
+    .prepare("SELECT * FROM registration_invites WHERE code_hash = ? LIMIT 1")
+    .bind(codeHash)
+    .first<RegistrationInviteRecord>();
 }
 
 export async function listRegistrationInvites(
@@ -438,6 +576,267 @@ export async function revokeRegistrationInvite(
   return (result.meta?.changes ?? 0) > 0;
 }
 
+export async function findPendingRegistrationById(
+  db: D1Database,
+  id: string,
+): Promise<PendingRegistrationContext | null> {
+  return db
+    .prepare(
+      `SELECT
+        p.id, p.email, p.password_hash, p.salt, p.profile_name, p.invite_id,
+        p.created_at, p.updated_at, p.expires_at,
+        c.id AS challenge_id, c.code_hash, c.attempts, c.last_sent_at,
+        c.expires_at AS challenge_expires_at,
+        c.created_at AS challenge_created_at,
+        c.updated_at AS challenge_updated_at
+       FROM pending_registrations p
+       INNER JOIN registration_challenges c ON c.pending_registration_id = p.id
+       WHERE p.id = ?
+       LIMIT 1`,
+    )
+    .bind(id)
+    .first<PendingRegistrationContext>();
+}
+
+export async function findPendingRegistrationByEmail(
+  db: D1Database,
+  email: string,
+): Promise<PendingRegistrationContext | null> {
+  return db
+    .prepare(
+      `SELECT
+        p.id, p.email, p.password_hash, p.salt, p.profile_name, p.invite_id,
+        p.created_at, p.updated_at, p.expires_at,
+        c.id AS challenge_id, c.code_hash, c.attempts, c.last_sent_at,
+        c.expires_at AS challenge_expires_at,
+        c.created_at AS challenge_created_at,
+        c.updated_at AS challenge_updated_at
+       FROM pending_registrations p
+       INNER JOIN registration_challenges c ON c.pending_registration_id = p.id
+       WHERE p.email = ? COLLATE NOCASE
+       LIMIT 1`,
+    )
+    .bind(email)
+    .first<PendingRegistrationContext>();
+}
+
+export async function findPendingRegistrationByName(
+  db: D1Database,
+  name: string,
+): Promise<PendingRegistrationContext | null> {
+  return db
+    .prepare(
+      `SELECT
+        p.id, p.email, p.password_hash, p.salt, p.profile_name, p.invite_id,
+        p.created_at, p.updated_at, p.expires_at,
+        c.id AS challenge_id, c.code_hash, c.attempts, c.last_sent_at,
+        c.expires_at AS challenge_expires_at,
+        c.created_at AS challenge_created_at,
+        c.updated_at AS challenge_updated_at
+       FROM pending_registrations p
+       INNER JOIN registration_challenges c ON c.pending_registration_id = p.id
+       WHERE p.profile_name = ? COLLATE NOCASE
+       LIMIT 1`,
+    )
+    .bind(name)
+    .first<PendingRegistrationContext>();
+}
+
+export async function insertPendingRegistration(
+  db: D1Database,
+  pending: PendingRegistrationRecord,
+  challenge: RegistrationChallengeRecord,
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO pending_registrations
+         (id, email, password_hash, salt, profile_name, invite_id, created_at, updated_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        pending.id,
+        pending.email,
+        pending.password_hash,
+        pending.salt,
+        pending.profile_name,
+        pending.invite_id,
+        pending.created_at,
+        pending.updated_at,
+        pending.expires_at,
+      ),
+    db
+      .prepare(
+        `INSERT INTO registration_challenges
+         (id, pending_registration_id, code_hash, attempts, last_sent_at, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        challenge.id,
+        challenge.pending_registration_id,
+        challenge.code_hash,
+        challenge.attempts,
+        challenge.last_sent_at,
+        challenge.expires_at,
+        challenge.created_at,
+        challenge.updated_at,
+      ),
+  ]);
+}
+
+export async function updateRegistrationChallenge(
+  db: D1Database,
+  pendingRegistrationId: string,
+  challengeId: string,
+  codeHash: string,
+  sentAt: number,
+  expiresAt: number,
+): Promise<boolean> {
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE registration_challenges
+         SET code_hash = ?, attempts = 0, last_sent_at = ?, expires_at = ?, updated_at = ?
+         WHERE id = ? AND pending_registration_id = ?`,
+      )
+      .bind(
+        codeHash,
+        sentAt,
+        expiresAt,
+        sentAt,
+        challengeId,
+        pendingRegistrationId,
+      ),
+    db
+      .prepare(
+        `UPDATE pending_registrations
+         SET expires_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(expiresAt, sentAt, pendingRegistrationId),
+  ]);
+  const challengeUpdate = results[0] as
+    { meta?: { changes?: number } } | undefined;
+  return (challengeUpdate?.meta?.changes ?? 0) > 0;
+}
+
+export async function incrementRegistrationChallengeAttempts(
+  db: D1Database,
+  challengeId: string,
+  now: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE registration_challenges
+       SET attempts = attempts + 1, updated_at = ?
+       WHERE id = ? AND attempts < 5 AND expires_at > ?`,
+    )
+    .bind(now, challengeId, now)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function deletePendingRegistration(
+  db: D1Database,
+  id: string,
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM pending_registrations WHERE id = ?")
+    .bind(id)
+    .run();
+}
+
+export async function completePendingRegistration(
+  db: D1Database,
+  pending: PendingRegistrationRecord,
+  user: UserRecord,
+  profile: ProfileRecord,
+  bootstrapAdmin = false,
+): Promise<boolean> {
+  const now = Date.now();
+  const inviteCondition = pending.invite_id
+    ? `EXISTS (
+         SELECT 1 FROM registration_invites
+         WHERE id = ?
+           AND revoked_at IS NULL
+           AND (expires_at IS NULL OR expires_at > ?)
+           AND use_count < use_limit
+       )`
+    : "1 = 1";
+  const inviteValues = pending.invite_id ? [pending.invite_id, now] : [];
+
+  const results = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO users
+         (id, email, password, salt, role, created_at, updated_at, default_profile_id, email_verified_at, status)
+         SELECT ?, ?, ?, ?,
+           CASE WHEN ? = 1 OR NOT EXISTS (SELECT 1 FROM users) THEN 'admin' ELSE ? END,
+           ?, ?, NULL, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = ? COLLATE NOCASE)
+           AND NOT EXISTS (SELECT 1 FROM profiles WHERE name = ? COLLATE NOCASE)
+           AND ${inviteCondition}`,
+      )
+      .bind(
+        user.id,
+        user.email,
+        user.password,
+        user.salt,
+        bootstrapAdmin ? 1 : 0,
+        user.role,
+        user.created_at,
+        user.updated_at,
+        user.email_verified_at ?? now,
+        user.status ?? "active",
+        user.email,
+        profile.name,
+        ...inviteValues,
+      ),
+    db
+      .prepare(
+        `INSERT INTO profiles
+         (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM users WHERE id = ?)`,
+      )
+      .bind(
+        profile.id,
+        profile.user_id,
+        profile.name,
+        profile.skin_hash,
+        profile.cape_hash,
+        profile.skin_model,
+        profile.created_at ?? user.created_at,
+        profile.updated_at ?? user.updated_at,
+        user.id,
+      ),
+    db
+      .prepare(
+        `UPDATE users
+         SET default_profile_id = ?
+         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ? AND user_id = ?)`,
+      )
+      .bind(profile.id, user.id, profile.id, user.id),
+    db
+      .prepare(
+        `UPDATE registration_invites
+         SET use_count = use_count + 1, updated_at = ?
+         WHERE id = ?
+           AND revoked_at IS NULL
+           AND (expires_at IS NULL OR expires_at > ?)
+           AND use_count < use_limit
+           AND EXISTS (SELECT 1 FROM users WHERE id = ?)`,
+      )
+      .bind(now, pending.invite_id, now, user.id),
+    db
+      .prepare("DELETE FROM pending_registrations WHERE id = ?")
+      .bind(pending.id),
+  ]);
+
+  const userInsert = results[0] as { meta?: { changes?: number } } | undefined;
+  return (userInsert?.meta?.changes ?? 0) > 0;
+}
+
 export async function revokeOtherWebSessions(
   db: D1Database,
   userId: string,
@@ -446,13 +845,16 @@ export async function revokeOtherWebSessions(
 ): Promise<void> {
   await db
     .prepare(
-      'UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL',
+      "UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL",
     )
     .bind(revokedAt, userId, currentSessionId)
     .run();
 }
 
-export async function createServerSession(db: D1Database, session: ServerSessionRecord): Promise<void> {
+export async function createServerSession(
+  db: D1Database,
+  session: ServerSessionRecord,
+): Promise<void> {
   await db
     .prepare(
       `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
@@ -462,7 +864,13 @@ export async function createServerSession(db: D1Database, session: ServerSession
          created_at = excluded.created_at,
          expires_at = excluded.expires_at`,
     )
-    .bind(session.server_id, session.profile_id, session.user_id, session.created_at, session.expires_at)
+    .bind(
+      session.server_id,
+      session.profile_id,
+      session.user_id,
+      session.created_at,
+      session.expires_at,
+    )
     .run();
 }
 
@@ -492,7 +900,9 @@ export async function updatePassword(
   updatedAt: number,
 ): Promise<void> {
   await db
-    .prepare('UPDATE users SET password = ?, salt = ?, updated_at = ? WHERE id = ?')
+    .prepare(
+      "UPDATE users SET password = ?, salt = ?, updated_at = ? WHERE id = ?",
+    )
     .bind(password, salt, updatedAt, userId)
     .run();
 }
@@ -500,19 +910,22 @@ export async function updatePassword(
 export async function updateProfileAsset(
   db: D1Database,
   profileId: string,
-  asset: 'skin' | 'cape',
+  asset: "skin" | "cape",
   hash: string | null,
   model?: SkinModel,
 ): Promise<void> {
-  if (asset === 'skin') {
+  if (asset === "skin") {
     await db
-      .prepare('UPDATE profiles SET skin_hash = ?, skin_model = ? WHERE id = ?')
-      .bind(hash, model ?? 'classic', profileId)
+      .prepare("UPDATE profiles SET skin_hash = ?, skin_model = ? WHERE id = ?")
+      .bind(hash, model ?? "classic", profileId)
       .run();
     return;
   }
 
-  await db.prepare('UPDATE profiles SET cape_hash = ? WHERE id = ?').bind(hash, profileId).run();
+  await db
+    .prepare("UPDATE profiles SET cape_hash = ? WHERE id = ?")
+    .bind(hash, profileId)
+    .run();
 }
 
 export async function updateProfileAssetIfTextureExists(
@@ -528,21 +941,31 @@ export async function updateProfileAssetIfTextureExists(
     SELECT 1 FROM texture_wardrobe
     WHERE id = ? AND user_id = ? AND hash = ? AND texture_type = ?
   )`;
-  const statement = asset === 'skin'
-    ? db
-      .prepare(
-        `UPDATE profiles
+  const statement =
+    asset === "skin"
+      ? db
+          .prepare(
+            `UPDATE profiles
          SET skin_hash = ?, skin_model = ?
          WHERE id = ? AND user_id = ? AND ${textureExists}`,
-      )
-      .bind(hash, model ?? 'classic', profileId, userId, textureId, userId, hash, asset)
-    : db
-      .prepare(
-        `UPDATE profiles
+          )
+          .bind(
+            hash,
+            model ?? "classic",
+            profileId,
+            userId,
+            textureId,
+            userId,
+            hash,
+            asset,
+          )
+      : db
+          .prepare(
+            `UPDATE profiles
          SET cape_hash = ?
          WHERE id = ? AND user_id = ? AND ${textureExists}`,
-      )
-      .bind(hash, profileId, userId, textureId, userId, hash, asset);
+          )
+          .bind(hash, profileId, userId, textureId, userId, hash, asset);
   const result = await statement.run();
   return (result.meta?.changes ?? 0) > 0;
 }
@@ -553,7 +976,9 @@ export async function findTextureByIdForUser(
   userId: string,
 ): Promise<TextureWardrobeRecord | null> {
   return db
-    .prepare('SELECT * FROM texture_wardrobe WHERE id = ? AND user_id = ? LIMIT 1')
+    .prepare(
+      "SELECT * FROM texture_wardrobe WHERE id = ? AND user_id = ? LIMIT 1",
+    )
     .bind(textureId, userId)
     .first<TextureWardrobeRecord>();
 }
@@ -574,9 +999,12 @@ export async function findTextureByUserHashAndType(
     .first<TextureWardrobeRecord>();
 }
 
-export async function countTexturesByUserId(db: D1Database, userId: string): Promise<number> {
+export async function countTexturesByUserId(
+  db: D1Database,
+  userId: string,
+): Promise<number> {
   const row = await db
-    .prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ?')
+    .prepare("SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ?")
     .bind(userId)
     .first<{ count: number }>();
   return Number(row?.count ?? 0);
@@ -591,21 +1019,21 @@ export async function listTexturesByUserId(
 ): Promise<TextureWardrobeRecord[]> {
   const statement = textureType
     ? db
-      .prepare(
-        `SELECT * FROM texture_wardrobe
+        .prepare(
+          `SELECT * FROM texture_wardrobe
          WHERE user_id = ? AND texture_type = ?
          ORDER BY updated_at DESC, id DESC
          LIMIT ? OFFSET ?`,
-      )
-      .bind(userId, textureType, limit, offset)
+        )
+        .bind(userId, textureType, limit, offset)
     : db
-      .prepare(
-        `SELECT * FROM texture_wardrobe
+        .prepare(
+          `SELECT * FROM texture_wardrobe
          WHERE user_id = ?
          ORDER BY updated_at DESC, id DESC
          LIMIT ? OFFSET ?`,
-      )
-      .bind(userId, limit, offset);
+        )
+        .bind(userId, limit, offset);
   const result = await statement.all<TextureWardrobeRecord>();
   return result.results;
 }
@@ -616,10 +1044,16 @@ export async function countTexturesByUserIdAndType(
   textureType: TextureType | null,
 ): Promise<number> {
   const statement = textureType
-    ? db.prepare(
-      'SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ? AND texture_type = ?',
-    ).bind(userId, textureType)
-    : db.prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ?').bind(userId);
+    ? db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ? AND texture_type = ?",
+        )
+        .bind(userId, textureType)
+    : db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ?",
+        )
+        .bind(userId);
   const row = await statement.first<{ count: number }>();
   return Number(row?.count ?? 0);
 }
@@ -664,7 +1098,9 @@ export async function updateTextureName(
   updatedAt: number,
 ): Promise<boolean> {
   const result = await db
-    .prepare('UPDATE texture_wardrobe SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+    .prepare(
+      "UPDATE texture_wardrobe SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+    )
     .bind(name, updatedAt, textureId, userId)
     .run();
   return (result.meta?.changes ?? 0) > 0;
@@ -672,9 +1108,12 @@ export async function updateTextureName(
 
 export async function deleteTextureIfUnreferenced(
   db: D1Database,
-  texture: Pick<TextureWardrobeRecord, 'id' | 'user_id' | 'hash' | 'texture_type'>,
+  texture: Pick<
+    TextureWardrobeRecord,
+    "id" | "user_id" | "hash" | "texture_type"
+  >,
 ): Promise<boolean> {
-  const column = texture.texture_type === 'skin' ? 'skin_hash' : 'cape_hash';
+  const column = texture.texture_type === "skin" ? "skin_hash" : "cape_hash";
   const result = await db
     .prepare(
       `DELETE FROM texture_wardrobe
@@ -691,9 +1130,9 @@ export async function deleteTextureIfUnreferenced(
 
 export async function listTextureProfileReferences(
   db: D1Database,
-  texture: Pick<TextureWardrobeRecord, 'user_id' | 'hash' | 'texture_type'>,
+  texture: Pick<TextureWardrobeRecord, "user_id" | "hash" | "texture_type">,
 ): Promise<TextureProfileReference[]> {
-  const column = texture.texture_type === 'skin' ? 'skin_hash' : 'cape_hash';
+  const column = texture.texture_type === "skin" ? "skin_hash" : "cape_hash";
   const result = await db
     .prepare(
       `SELECT id, name FROM profiles
@@ -702,19 +1141,33 @@ export async function listTextureProfileReferences(
     )
     .bind(texture.user_id, texture.hash)
     .all<{ id: string; name: string }>();
-  return result.results.map((profile) => ({ ...profile, asset: texture.texture_type }));
+  return result.results.map((profile) => ({
+    ...profile,
+    asset: texture.texture_type,
+  }));
 }
 
-export async function countTextureRecordsByHash(db: D1Database, hash: string): Promise<number> {
+export async function countTextureRecordsByHash(
+  db: D1Database,
+  hash: string,
+): Promise<number> {
   const row = await db
-    .prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE hash = ?')
+    .prepare("SELECT COUNT(*) AS count FROM texture_wardrobe WHERE hash = ?")
     .bind(hash)
     .first<{ count: number }>();
   return Number(row?.count ?? 0);
 }
 
-export async function updateUserRole(db: D1Database, userId: string, role: UserRole, updatedAt: number): Promise<void> {
-  await db.prepare('UPDATE users SET role = ?, updated_at = ? WHERE id = ?').bind(role, updatedAt, userId).run();
+export async function updateUserRole(
+  db: D1Database,
+  userId: string,
+  role: UserRole,
+  updatedAt: number,
+): Promise<void> {
+  await db
+    .prepare("UPDATE users SET role = ?, updated_at = ? WHERE id = ?")
+    .bind(role, updatedAt, userId)
+    .run();
 }
 
 export interface TextureCleanupRow {
@@ -750,7 +1203,10 @@ export async function claimTextureCleanup(
     .first<TextureCleanupRow>();
 }
 
-export async function completeTextureCleanup(db: D1Database, hash: string): Promise<boolean> {
+export async function completeTextureCleanup(
+  db: D1Database,
+  hash: string,
+): Promise<boolean> {
   const result = await db
     .prepare(
       `DELETE FROM texture_cleanup
@@ -769,7 +1225,10 @@ export async function completeTextureCleanup(db: D1Database, hash: string): Prom
   return (result.meta?.changes ?? 0) > 0;
 }
 
-export async function cancelTextureCleanupIfReferenced(db: D1Database, hash: string): Promise<void> {
+export async function cancelTextureCleanupIfReferenced(
+  db: D1Database,
+  hash: string,
+): Promise<void> {
   await db
     .prepare(
       `DELETE FROM texture_cleanup
@@ -809,21 +1268,30 @@ export async function retryTextureCleanup(
   return (result.meta?.changes ?? 0) > 0;
 }
 
-export async function countAssetReferences(db: D1Database, hash: string): Promise<number> {
+export async function countAssetReferences(
+  db: D1Database,
+  hash: string,
+): Promise<number> {
   const [profileRow, wardrobeRow] = await Promise.all([
     db
-      .prepare('SELECT COUNT(*) AS count FROM profiles WHERE skin_hash = ? OR cape_hash = ?')
+      .prepare(
+        "SELECT COUNT(*) AS count FROM profiles WHERE skin_hash = ? OR cape_hash = ?",
+      )
       .bind(hash, hash)
       .first<{ count: number }>(),
     db
-      .prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE hash = ?')
+      .prepare("SELECT COUNT(*) AS count FROM texture_wardrobe WHERE hash = ?")
       .bind(hash)
       .first<{ count: number }>(),
   ]);
   return Number(profileRow?.count ?? 0) + Number(wardrobeRow?.count ?? 0);
 }
 
-export async function listUsers(db: D1Database, limit: number, offset: number): Promise<UserWithProfile[]> {
+export async function listUsers(
+  db: D1Database,
+  limit: number,
+  offset: number,
+): Promise<UserWithProfile[]> {
   const result = await db
     .prepare(
       `SELECT

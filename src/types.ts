@@ -1,8 +1,9 @@
-import type { RegistrationMode } from './utils/registration';
+import type { RegistrationMode } from "./utils/registration";
+import type { MailSender } from "./utils/mail";
 
-export type UserRole = 'user' | 'admin';
-export type SkinModel = 'classic' | 'slim';
-export type { RegistrationMode } from './utils/registration';
+export type UserRole = "user" | "admin";
+export type SkinModel = "classic" | "slim";
+export type { RegistrationMode } from "./utils/registration";
 
 export interface Bindings {
   DB: D1Database;
@@ -16,13 +17,17 @@ export interface Bindings {
   WEB_SESSION_SECRET?: string;
   RATE_LIMITER: DurableObjectNamespace;
   TURNSTILE_SECRET_KEY?: string;
+  RESEND_API_KEY?: string;
+  MAIL_FROM?: string;
+  BOOTSTRAP_ADMIN_EMAIL?: string;
+  MAIL_SENDER?: MailSender;
 }
 
 export interface Variables {
   user: UserRecord;
   profile: ProfileRecord;
   token?: TokenRecord;
-  authMethod: 'bearer' | 'cookie';
+  authMethod: "bearer" | "cookie";
   webSession?: WebSessionRecord;
 }
 
@@ -40,6 +45,8 @@ export interface UserRecord {
   created_at: number;
   updated_at: number;
   default_profile_id?: string | null;
+  email_verified_at?: number | null;
+  status?: "active" | "disabled";
 }
 
 export interface ProfileRecord {
@@ -98,6 +105,29 @@ export interface RegistrationInviteRecord {
   updated_at: number;
 }
 
+export interface PendingRegistrationRecord {
+  id: string;
+  email: string;
+  password_hash: string;
+  salt: string;
+  profile_name: string;
+  invite_id: string | null;
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+}
+
+export interface RegistrationChallengeRecord {
+  id: string;
+  pending_registration_id: string;
+  code_hash: string;
+  attempts: number;
+  last_sent_at: number;
+  expires_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface UserWithProfile extends UserRecord {
   profile_id: string;
   profile_name: string;
@@ -112,7 +142,7 @@ export interface YggdrasilProfile {
 }
 
 export interface TextureProperty {
-  name: 'textures';
+  name: "textures";
   value: string;
   signature?: string;
 }

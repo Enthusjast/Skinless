@@ -1,5 +1,6 @@
 import { applyD1Migrations, SELF, env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { registerVerifiedAccount } from './verified-registration-fixture';
 
 const SKIN_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAJ0lEQVR4nO3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAAIDODUBAAAENBzWNAAAAAElFTkSuQmCC';
@@ -68,13 +69,7 @@ function authenticatedRequest(path: string, accessToken: string, init: RequestIn
 
 async function createClient(label: string): Promise<{ token: string; profileId: string }> {
   const email = `wardrobe-${label}-${crypto.randomUUID()}@example.com`;
-  const register = await jsonRequest('/api/register', {
-    email,
-    password: 'correct-password',
-    name: `W${label.slice(0, 15)}`,
-  });
-  expect(register.status).toBe(201);
-  const registered = await register.json() as { user: { profile: { id: string } } };
+  const registered = { user: await registerVerifiedAccount(email, 'correct-password', `W${label.slice(0, 15)}`) };
   const login = await jsonRequest('/authserver/authenticate', {
     username: email,
     password: 'correct-password',

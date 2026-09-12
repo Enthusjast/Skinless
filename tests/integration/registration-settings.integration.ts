@@ -1,6 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { hashSessionToken } from '../../src/utils/session';
+import { registerVerifiedAccount } from './verified-registration-fixture';
 
 interface AuthenticatedClient {
   userId: string;
@@ -18,16 +19,12 @@ async function jsonRequest(path: string, body: unknown): Promise<Response> {
 async function createClient(role: 'user' | 'admin'): Promise<AuthenticatedClient> {
   const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
   const email = `registration-settings-${suffix}@example.com`;
-  const register = await jsonRequest('/api/register', {
-    email,
-    password: 'correct-password',
-    name: `Invite${suffix.slice(0, 8)}`,
-  });
-  expect(register.status).toBe(201);
-  const registerBody = await register.json() as { user: { id: string } };
+  const registerBody = { user: await registerVerifiedAccount(email, 'correct-password', `Invite${suffix.slice(0, 8)}`) };
 
   if (role === 'admin') {
     await env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind('admin', registerBody.user.id).run();
+  } else {
+    await env.DB.prepare('UPDATE users SET role = ? WHERE id = ?').bind('user', registerBody.user.id).run();
   }
 
   const authenticate = await jsonRequest('/authserver/authenticate', {

@@ -3,7 +3,7 @@ import worker, { app } from '../src/index';
 
 describe('security and operational safeguards', () => {
   it('adds stable codes to management errors without changing Yggdrasil errors', async () => {
-    const management = await app.request('/api/register', {
+    const management = await app.request('/api/auth/register/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),

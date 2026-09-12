@@ -7,6 +7,7 @@ import {
 } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import worker from '../../src/index';
+import { registerVerifiedAccount } from './verified-registration-fixture';
 
 const PASSWORD = 'correct-password';
 const SKIN_PNG_BASE64 =
@@ -39,9 +40,7 @@ describe('deferred texture cleanup on Cloudflare runtime', () => {
     const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
     const email = `cleanup-${suffix}@example.com`;
     const name = `Cleanup${suffix}`;
-    const register = await jsonRequest('/api/register', { email, password: PASSWORD, name });
-    expect(register.status).toBe(201);
-    const registered = await register.json() as { user: { id: string; profile: { id: string } } };
+    const registered = { user: await registerVerifiedAccount(email, PASSWORD, name) };
 
     const authenticate = await jsonRequest('/authserver/authenticate', {
       username: email,

@@ -8,6 +8,7 @@ import {
 } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import worker from '../../src/index';
+import { registerVerifiedAccount } from './verified-registration-fixture';
 
 const EMAIL = 'runtime@example.com';
 const PASSWORD = 'correct-password';
@@ -357,13 +358,9 @@ describe('Cloudflare runtime integration', () => {
   it('manages profiles with real D1 and enforces names, quota, ownership, defaults, and deletion', async () => {
     const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 6);
     const ownerName = `Owner${suffix}`;
-    const registerResponse = await jsonRequest('/api/register', {
-      email: `profiles-${suffix}@example.com`,
-      password: PASSWORD,
-      name: ownerName,
-    });
-    expect(registerResponse.status).toBe(201);
-    const registerBody = await registerResponse.json() as { user: UserResponse };
+    const registerBody = {
+      user: await registerVerifiedAccount(`profiles-${suffix}@example.com`, PASSWORD, ownerName),
+    };
 
     const authenticateResponse = await jsonRequest('/authserver/authenticate', {
       username: `profiles-${suffix}@example.com`,
@@ -416,13 +413,9 @@ describe('Cloudflare runtime integration', () => {
     await expect(quotaResponse.json()).resolves.toMatchObject({ errorCode: 'profile_limit_reached' });
 
     const otherSuffix = crypto.randomUUID().replaceAll('-', '').slice(0, 6);
-    const otherRegisterResponse = await jsonRequest('/api/register', {
-      email: `other-profiles-${otherSuffix}@example.com`,
-      password: PASSWORD,
-      name: `Other${otherSuffix}`,
-    });
-    expect(otherRegisterResponse.status).toBe(201);
-    const otherUser = await otherRegisterResponse.json() as { user: UserResponse };
+    const otherUser = {
+      user: await registerVerifiedAccount(`other-profiles-${otherSuffix}@example.com`, PASSWORD, `Other${otherSuffix}`),
+    };
     const otherAuthenticateResponse = await jsonRequest('/authserver/authenticate', {
       username: `other-profiles-${otherSuffix}@example.com`,
       password: PASSWORD,
@@ -468,17 +461,12 @@ describe('Cloudflare runtime integration', () => {
   });
 
   it('completes the account, texture, and server join path using D1 and R2', async () => {
-    const registerResponse = await jsonRequest('/api/register', {
-      email: EMAIL,
-      password: PASSWORD,
-      name: PROFILE_NAME,
-    });
-
-    expect(registerResponse.status).toBe(201);
-    const registerBody = await registerResponse.json() as { user: UserResponse };
+    const registerBody = {
+      user: await registerVerifiedAccount(EMAIL, PASSWORD, PROFILE_NAME),
+    };
     expect(registerBody.user).toMatchObject({
       email: EMAIL,
-      role: 'user',
+      role: 'admin',
       profile: {
         name: PROFILE_NAME,
         skinHash: null,
@@ -491,7 +479,7 @@ describe('Cloudflare runtime integration', () => {
       .prepare('SELECT id, email, password, role FROM users WHERE id = ?')
       .bind(registerBody.user.id)
       .first<{ id: string; email: string; password: string; role: string }>();
-    expect(userRow).toMatchObject({ id: registerBody.user.id, email: EMAIL, role: 'user' });
+    expect(userRow).toMatchObject({ id: registerBody.user.id, email: EMAIL, role: 'admin' });
     expect(userRow?.password).not.toBe(PASSWORD);
 
     const profileRow = await env.DB
@@ -671,12 +659,7 @@ describe('Cloudflare runtime integration', () => {
     const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
     const email = `texture-${suffix}@example.com`;
     const name = `Texture${suffix}`;
-    const registerResponse = await jsonRequest('/api/register', {
-      email,
-      password: PASSWORD,
-      name,
-    });
-    expect(registerResponse.status).toBe(201);
+    await registerVerifiedAccount(email, PASSWORD, name);
 
     const authenticateResponse = await jsonRequest('/authserver/authenticate', {
       username: email,

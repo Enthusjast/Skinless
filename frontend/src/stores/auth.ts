@@ -10,10 +10,12 @@ import {
   login as loginWithCookies,
   logout as logoutWithCookies,
   renameProfile,
-  register,
+  resendRegistration,
+  startRegistration,
   setCsrfToken,
   setDefaultProfile,
   uploadAsset,
+  verifyRegistration,
   type ApiProfile,
   type ApiUser,
   type ProfileCollection,
@@ -80,8 +82,20 @@ export const useAuthStore = defineStore('auth', {
         this.loading = false;
       }
     },
-    async register(email: string, password: string, name: string) {
-      return register(email, password, name);
+    async registerStart(
+      email: string,
+      password: string,
+      name: string,
+      inviteCode?: string,
+      turnstileToken?: string,
+    ) {
+      return startRegistration(email, password, name, inviteCode, turnstileToken);
+    },
+    async registerVerify(challengeId: string, code: string) {
+      return verifyRegistration(challengeId, code);
+    },
+    async registerResend(challengeId: string) {
+      return resendRegistration(challengeId);
     },
     async logout() {
       const request = logoutWithCookies();

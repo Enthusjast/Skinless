@@ -19,7 +19,6 @@ import {
   insertProfileBelowLimit,
   insertRegistrationInvite,
   insertTextureBelowLimit,
-  insertUserAndProfile,
   insertWebSession,
   isConstraintViolation,
   listUsers,
@@ -85,18 +84,12 @@ import {
   parseRefreshCookie,
   setWebSessionCookies,
 } from '../utils/session';
-import type { AppEnv, ProfileRecord, SkinModel, UserRecord, UserRole, WebSessionRecord } from '../types';
+import type { AppEnv, ProfileRecord, SkinModel, UserRole, WebSessionRecord } from '../types';
 import {
   parseInviteInput,
   parseRegistrationSettings,
   type RegistrationSettingsValues,
 } from '../utils/registration';
-
-interface RegisterInput {
-  email?: unknown;
-  password?: unknown;
-  name?: unknown;
-}
 
 interface PasswordInput {
   currentPassword?: unknown;
@@ -568,49 +561,6 @@ async function applyTexture(c: Context<AppEnv>): Promise<Response> {
   return c.json({ texture: serializeTexture(c, texture), profile: serializeProfile(nextProfile) });
 }
 
-routes.post('/register', async (c) => {
-  const body = await readJson<RegisterInput>(c);
-  const email = asString(body?.email)?.toLowerCase();
-  const password = asPassword(body?.password);
-  const name = asString(body?.name);
-  if (!email || !password || !name) return jsonError(c, 400, 'email, password and name are required.');
-  if (!isValidEmail(email)) return jsonError(c, 400, 'A valid email address is required.');
-  if (password.length < 8) return jsonError(c, 400, 'Password must be at least 8 characters.');
-  if (password.length > 256) return jsonError(c, 400, 'Password must be 256 characters or fewer.');
-  if (!isValidProfileName(name)) return jsonError(c, 400, 'Game name must be 3-16 letters, numbers or underscores.');
-
-  const now = Date.now();
-  const salt = createSalt();
-  const user: UserRecord = {
-    id: generateUserId(),
-    email,
-    password: await hashPassword(password, salt),
-    salt,
-    role: 'user',
-    created_at: now,
-    updated_at: now,
-  };
-  const profile: ProfileRecord = {
-    id: generateProfileId(),
-    user_id: user.id,
-    name,
-    skin_hash: null,
-    cape_hash: null,
-    skin_model: 'classic',
-    created_at: now,
-    updated_at: now,
-  };
-
-  try {
-    await insertUserAndProfile(c.env.DB, user, profile);
-  } catch (error) {
-    if (isConstraintViolation(error)) return jsonError(c, 409, 'The email or game name is already in use.', 'Conflict');
-    throw error;
-  }
-
-  return c.json({ user: serializeUser(user, profile) }, 201);
-});
-
 routes.post('/auth/login', async (c) => {
   const body = await readJson<WebLoginInput>(c);
   const email = asString(body?.email)?.toLowerCase();
@@ -638,7 +588,7 @@ routes.post('/auth/login', async (c) => {
 
   const user = await findUserByEmail(c.env.DB, email);
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
-  if (!user || !passwordMatches) {
+  if (!user || !passwordMatches || user.email_verified_at === null || user.status === 'disabled') {
     return jsonError(c, 401, 'Invalid email or password.', 'Unauthorized');
   }
 
