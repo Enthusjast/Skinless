@@ -38,7 +38,13 @@ import {
   MAX_PROFILES_PER_USER,
   setDefaultProfile,
 } from '../db/queries';
-import { cancelTextureCleanup, scheduleTextureCleanup } from '../texture-cleanup';
+import {
+  cacheTextureObject,
+  cancelTextureCleanupIfReferenced,
+  putTextureObject,
+  restoreTextureObject,
+  scheduleTextureCleanup,
+} from '../texture-cleanup';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import {
   admitLoginAttempt,
@@ -302,16 +308,11 @@ async function uploadAsset(
 
   const key = `${hash}.png`;
   if (!await c.env.BUCKET.head(key)) {
-    await c.env.BUCKET.put(key, normalized.bytes, {
-      httpMetadata: {
-        contentType: 'image/png',
-        cacheControl: 'public, max-age=31536000, immutable',
-      },
-    });
+    await putTextureObject(c.env.BUCKET, key, normalized.bytes);
   }
 
   if (!reused) {
-    await cancelTextureCleanup(c.env.DB, hash);
+    await cancelTextureCleanupIfReferenced(c.env.DB, hash);
     try {
       const inserted = await insertTextureBelowLimit(c.env.DB, texture, MAX_TEXTURES_PER_USER);
       if (!inserted) {
@@ -341,7 +342,7 @@ async function uploadAsset(
     }
   }
 
-  await cancelTextureCleanup(c.env.DB, hash);
+  await cancelTextureCleanupIfReferenced(c.env.DB, hash);
 
   let nextProfile = profile;
   if (applyToDefaultProfile) {
@@ -359,16 +360,12 @@ async function uploadAsset(
     nextProfile = asset === 'skin'
       ? { ...profile, skin_hash: hash, skin_model: texture.model ?? profile.skin_model }
       : { ...profile, cape_hash: hash };
-    await cancelTextureCleanup(c.env.DB, hash);
+    await cancelTextureCleanupIfReferenced(c.env.DB, hash);
     if (previousHash && previousHash !== hash) await scheduleIfUnreferenced(c, previousHash);
   }
 
-  await c.env.BUCKET.put(key, normalized.bytes, {
-    httpMetadata: {
-      contentType: 'image/png',
-      cacheControl: 'public, max-age=31536000, immutable',
-    },
-  });
+  await putTextureObject(c.env.BUCKET, key, normalized.bytes);
+  await cancelTextureCleanupIfReferenced(c.env.DB, hash);
 
   const quota = await wardrobeQuota(c);
   return c.json({
@@ -466,8 +463,12 @@ async function applyTexture(c: Context<AppEnv>): Promise<Response> {
   if (!profile) return profileNotFound(c);
   if (!isTextureModelCompatible(texture, profile)) return textureModelMismatch(c);
 
+  const objectKey = `${texture.hash}.png`;
+  const cached = await cacheTextureObject(c.env.BUCKET, objectKey);
+  if (!cached) return textureNotFound(c);
+
   const previousHash = assetHash(profile, texture.texture_type);
-  await cancelTextureCleanup(c.env.DB, texture.hash);
+  await cancelTextureCleanupIfReferenced(c.env.DB, texture.hash);
   const applied = await updateProfileAssetIfTextureExists(
     c.env.DB,
     profile.id,
@@ -485,7 +486,9 @@ async function applyTexture(c: Context<AppEnv>): Promise<Response> {
     ? { ...profile, skin_hash: texture.hash, skin_model: texture.model ?? profile.skin_model }
     : { ...profile, cape_hash: texture.hash };
   if (c.get('profile').id === profile.id) c.set('profile', nextProfile);
-  await cancelTextureCleanup(c.env.DB, texture.hash);
+  await cancelTextureCleanupIfReferenced(c.env.DB, texture.hash);
+  await restoreTextureObject(c.env.BUCKET, objectKey, cached);
+  await cancelTextureCleanupIfReferenced(c.env.DB, texture.hash);
   if (previousHash && previousHash !== texture.hash) await scheduleIfUnreferenced(c, previousHash);
   return c.json({ texture: serializeTexture(c, texture), profile: serializeProfile(nextProfile) });
 }

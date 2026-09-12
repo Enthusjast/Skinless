@@ -639,7 +639,8 @@ export async function claimTextureCleanup(
 ): Promise<TextureCleanupRow | null> {
   return db
     .prepare(
-      `DELETE FROM texture_cleanup
+      `SELECT hash, object_key, scheduled_at, attempts, last_error
+       FROM texture_cleanup
        WHERE hash = ?
          AND scheduled_at <= ?
          AND NOT EXISTS (
@@ -650,10 +651,29 @@ export async function claimTextureCleanup(
            SELECT 1 FROM texture_wardrobe
            WHERE hash = ?
          )
-       RETURNING hash, object_key, scheduled_at, attempts, last_error`,
+       LIMIT 1`,
     )
     .bind(hash, now, hash, hash, hash)
     .first<TextureCleanupRow>();
+}
+
+export async function completeTextureCleanup(db: D1Database, hash: string): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `DELETE FROM texture_cleanup
+       WHERE hash = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM profiles
+           WHERE skin_hash = ? OR cape_hash = ?
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM texture_wardrobe
+           WHERE hash = ?
+         )`,
+    )
+    .bind(hash, hash, hash, hash)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function cancelTextureCleanupIfReferenced(db: D1Database, hash: string): Promise<void> {
@@ -684,28 +704,12 @@ export async function retryTextureCleanup(
   await db
     .prepare(
       `INSERT INTO texture_cleanup (hash, object_key, scheduled_at, attempts, last_error)
-       SELECT ?, ?, ?, ?, ?
-       WHERE NOT EXISTS (
-         SELECT 1 FROM profiles
-         WHERE skin_hash = ? OR cape_hash = ?
-       )
-         AND NOT EXISTS (
-           SELECT 1 FROM texture_wardrobe
-           WHERE hash = ?
-         )
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (hash) DO UPDATE SET
          object_key = excluded.object_key,
          scheduled_at = excluded.scheduled_at,
          attempts = excluded.attempts,
-         last_error = excluded.last_error
-       WHERE NOT EXISTS (
-         SELECT 1 FROM profiles
-         WHERE skin_hash = ? OR cape_hash = ?
-       )
-         AND NOT EXISTS (
-           SELECT 1 FROM texture_wardrobe
-           WHERE hash = ?
-         )`,
+         last_error = excluded.last_error`,
     )
     .bind(
       cleanup.hash,
@@ -713,12 +717,6 @@ export async function retryTextureCleanup(
       cleanup.scheduled_at,
       cleanup.attempts + 1,
       error,
-      cleanup.hash,
-      cleanup.hash,
-      cleanup.hash,
-      cleanup.hash,
-      cleanup.hash,
-      cleanup.hash,
     )
     .run();
 }

@@ -106,6 +106,10 @@ class MemoryD1 {
       );
       return texture ? { ...texture } : null;
     }
+    if (sql.startsWith('SELECT * FROM texture_wardrobe WHERE id = ? AND user_id = ?')) {
+      const texture = this.textures.get(String(values[0]));
+      return texture && texture.user_id === values[1] ? { ...texture } : null;
+    }
     if (sql.startsWith('SELECT COUNT(*)') && sql.includes('FROM texture_wardrobe')) {
       if (sql.includes('WHERE hash = ?')) {
         return { count: [...this.textures.values()].filter((texture) => texture.hash === values[0]).length };
@@ -262,9 +266,18 @@ class MemoryD1 {
 
 class MemoryBucket {
   public files = new Map<string, Uint8Array>();
+  public onGet: ((key: string) => void) | undefined;
 
   async head(key: string): Promise<R2Object | null> {
     return this.files.has(key) ? ({ key } as R2Object) : null;
+  }
+
+  async get(key: string): Promise<R2ObjectBody | null> {
+    const bytes = this.files.get(key);
+    if (!bytes) return null;
+    const snapshot = bytes.slice();
+    this.onGet?.(key);
+    return { arrayBuffer: async () => snapshot.buffer } as R2ObjectBody;
   }
 
   async put(key: string, body: BodyInit): Promise<R2Object> {
@@ -308,9 +321,22 @@ describe('management API', () => {
 
     expect(upload.status).toBe(201);
     expect(bucket.files.size).toBe(1);
+    const uploadBody = await upload.json() as { hash: string; texture: { id: string } };
     expect([...db.profiles.values()][0].skin_model).toBe('slim');
 
     const joinedProfile = [...db.profiles.values()][0];
+    bucket.onGet = () => {
+      bucket.files.delete(`${uploadBody.hash}.png`);
+      bucket.onGet = undefined;
+    };
+    const reapply = await app.request(`/api/user/wardrobe/${uploadBody.texture.id}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ profileId: joinedProfile.id }),
+    }, env);
+    expect(reapply.status).toBe(200);
+    expect(bucket.files.has(`${uploadBody.hash}.png`)).toBe(true);
+
     const join = await app.request('/sessionserver/session/minecraft/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: token, selectedProfile: { id: joinedProfile.id }, serverId: 'smoke-server' }) }, env);
     expect(join.status).toBe(204);
     const hasJoined = await app.request('/sessionserver/session/minecraft/hasJoined?username=PlayerOne&serverId=smoke-server', {}, env);

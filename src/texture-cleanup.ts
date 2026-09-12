@@ -1,6 +1,7 @@
 import {
-  cancelTextureCleanupIfReferenced,
+  cancelTextureCleanupIfReferenced as cancelTextureCleanupIfReferencedQuery,
   claimTextureCleanup,
+  completeTextureCleanup,
   countAssetReferences,
   retryTextureCleanup,
 } from './db/queries';
@@ -22,9 +23,13 @@ export async function cancelTextureCleanup(db: D1Database, hash: string): Promis
   await db.prepare('DELETE FROM texture_cleanup WHERE hash = ?').bind(hash).run();
 }
 
+export async function cancelTextureCleanupIfReferenced(db: D1Database, hash: string): Promise<void> {
+  await cancelTextureCleanupIfReferencedQuery(db, hash);
+}
+
 export async function scheduleTextureCleanup(db: D1Database, hash: string, now = Date.now()): Promise<void> {
   if (await countAssetReferences(db, hash) > 0) {
-    await cancelTextureCleanup(db, hash);
+    await cancelTextureCleanupIfReferenced(db, hash);
     return;
   }
 
@@ -57,13 +62,13 @@ function cleanupError(error: unknown): string {
   return message.slice(0, 1000);
 }
 
-interface CachedTextureObject {
+export interface CachedTextureObject {
   bytes: ArrayBuffer;
   httpMetadata?: R2HTTPMetadata;
   customMetadata?: Record<string, string>;
 }
 
-async function cacheTextureObject(bucket: R2Bucket, objectKey: string): Promise<CachedTextureObject | null> {
+export async function cacheTextureObject(bucket: R2Bucket, objectKey: string): Promise<CachedTextureObject | null> {
   const object = await bucket.get(objectKey);
   if (!object) return null;
   return {
@@ -73,7 +78,7 @@ async function cacheTextureObject(bucket: R2Bucket, objectKey: string): Promise<
   };
 }
 
-async function restoreTextureObject(
+export async function restoreTextureObject(
   bucket: R2Bucket,
   objectKey: string,
   cached: CachedTextureObject,
@@ -81,6 +86,15 @@ async function restoreTextureObject(
   await bucket.put(objectKey, cached.bytes, {
     httpMetadata: cached.httpMetadata,
     customMetadata: cached.customMetadata,
+  });
+}
+
+export async function putTextureObject(bucket: R2Bucket, objectKey: string, bytes: Uint8Array): Promise<void> {
+  await bucket.put(objectKey, bytes, {
+    httpMetadata: {
+      contentType: 'image/png',
+      cacheControl: 'public, max-age=31536000, immutable',
+    },
   });
 }
 
@@ -102,21 +116,48 @@ export async function processTextureCleanup(
 
     const cleanup = await claimTextureCleanup(db, candidate.hash, now);
     if (!cleanup) {
-      await cancelTextureCleanupIfReferenced(db, candidate.hash);
-      stats.cancelled += 1;
+      if (await countAssetReferences(db, candidate.hash) > 0) {
+        await cancelTextureCleanupIfReferenced(db, candidate.hash);
+        stats.cancelled += 1;
+      }
       continue;
     }
 
     try {
       const cached = await cacheTextureObject(bucket, cleanup.object_key);
-      await bucket.delete(cleanup.object_key);
-
       if (await countAssetReferences(db, cleanup.hash) > 0) {
-        if (cached) await restoreTextureObject(bucket, cleanup.object_key, cached);
+        await cancelTextureCleanupIfReferenced(db, cleanup.hash);
         stats.cancelled += 1;
         continue;
       }
 
+      await bucket.delete(cleanup.object_key);
+
+      if (await countAssetReferences(db, cleanup.hash) > 0) {
+        if (cached) await restoreTextureObject(bucket, cleanup.object_key, cached);
+        await cancelTextureCleanupIfReferenced(db, cleanup.hash);
+        stats.cancelled += 1;
+        continue;
+      }
+
+      if (await completeTextureCleanup(db, cleanup.hash)) {
+        stats.deleted += 1;
+        continue;
+      }
+
+      // A reference may have been committed between the final recheck and the
+      // conditional queue-row deletion. Restore the cached bytes before
+      // acknowledging that cancellation; the reference mutation also
+      // re-puts its bytes after committing the D1 reference.
+      if (await countAssetReferences(db, cleanup.hash) > 0) {
+        if (cached) await restoreTextureObject(bucket, cleanup.object_key, cached);
+        await cancelTextureCleanupIfReferenced(db, cleanup.hash);
+        stats.cancelled += 1;
+        continue;
+      }
+
+      // Another cleanup invocation completed the same row after this worker
+      // read it. The R2 delete is idempotent, so this invocation is complete.
       stats.deleted += 1;
     } catch (error) {
       const message = cleanupError(error);
