@@ -1,4 +1,5 @@
 import {
+  applyD1Migrations,
   SELF,
   createExecutionContext,
   createScheduledController,
@@ -43,6 +44,25 @@ function jsonRequest(path: string, body: unknown): Promise<Response> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+function authenticatedRequest(path: string, accessToken: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${accessToken}`);
+  return SELF.fetch(`https://worker.test${path}`, { ...init, headers });
+}
+
+function authenticatedJsonRequest(
+  path: string,
+  accessToken: string,
+  method: string,
+  body?: unknown,
+): Promise<Response> {
+  return authenticatedRequest(path, accessToken, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 
@@ -129,52 +149,276 @@ function cookieHeader(setCookie: string): string {
 }
 
 describe('Cloudflare runtime integration', () => {
-  it('applies the multiple-profile migration with default tracking and preserved references', async () => {
-    const suffix = crypto.randomUUID().replaceAll('-', '');
-    const userId = `migration-user-${suffix}`;
-    const firstProfileId = `a${suffix.slice(0, 31)}`;
-    const secondProfileId = `b${suffix.slice(0, 31)}`;
-    const now = Date.now();
+  it('runs the profile migration from legacy D1 data and preserves references', async () => {
+    const migrationTable = 'task_11_legacy_migrations';
+    await env.DB.exec(`
+      DROP TABLE IF EXISTS web_sessions;
+      DROP TABLE IF EXISTS server_sessions_migration_backup;
+      DROP TABLE IF EXISTS tokens_migration_backup;
+      DROP TABLE IF EXISTS server_sessions;
+      DROP TABLE IF EXISTS tokens;
+      DROP TABLE IF EXISTS profiles_new;
+      DROP TABLE IF EXISTS profiles;
+      DROP TABLE IF EXISTS users;
+      DROP TABLE IF EXISTS ${migrationTable};
+    `);
 
-    await env.DB.prepare(
-      `INSERT INTO users (id, email, password, salt, role, created_at, updated_at, default_profile_id)
-       VALUES (?, ?, ?, ?, 'user', ?, ?, NULL)`,
-    ).bind(userId, `${suffix}@example.com`, 'hashed', 'salt', now, now).run();
-    await env.DB.prepare(
-      `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(firstProfileId, userId, `Legacy${suffix.slice(0, 8)}`, 'skin-hash', 'cape-hash', 'classic', now, now).run();
-    await env.DB.prepare('UPDATE users SET default_profile_id = ? WHERE id = ?').bind(firstProfileId, userId).run();
-    await env.DB.prepare(
-      `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
-       VALUES (?, ?, ?, NULL, NULL, 'slim', ?, ?)`,
-    ).bind(secondProfileId, userId, `Second${suffix.slice(0, 8)}`, now + 1, now + 1).run();
-    await env.DB.prepare(
-      `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).bind(`migration-token-${suffix}`, 'client', userId, firstProfileId, now, now + 60_000).run();
-    await env.DB.prepare(
-      `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind(`migration-server-${suffix}`, firstProfileId, userId, now, now + 60_000).run();
+    const legacyMigrations = env.TEST_MIGRATIONS.filter(({ name }) => name === '0001_init.sql' || name === '0002_web_sessions.sql');
+    const profileMigration = env.TEST_MIGRATIONS.filter(({ name }) => name === '0003_multiple_profiles.sql');
+    expect(legacyMigrations).toHaveLength(2);
+    expect(profileMigration).toHaveLength(1);
 
-    const userRow = await env.DB.prepare('SELECT default_profile_id FROM users WHERE id = ?').bind(userId).first<{ default_profile_id: string }>();
+    await applyD1Migrations(env.DB, legacyMigrations, migrationTable);
+
+    const firstUserId = 'legacy-user-a';
+    const secondUserId = 'legacy-user-b';
+    const firstProfileId = '11111111111111111111111111111111';
+    const secondProfileId = '22222222222222222222222222222222';
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO users (id, email, password, salt, role, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(firstUserId, 'legacy-a@example.com', 'hash-a', 'salt-a', 'user', 100, 101),
+      env.DB.prepare(
+        `INSERT INTO users (id, email, password, salt, role, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(secondUserId, 'legacy-b@example.com', 'hash-b', 'salt-b', 'user', 200, 201),
+      env.DB.prepare(
+        `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(firstProfileId, firstUserId, 'LegacyHero', 'skin-hash-a', 'cape-hash-a', 'classic'),
+      env.DB.prepare(
+        `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(secondProfileId, secondUserId, 'legacyhero', 'skin-hash-b', null, 'slim'),
+      env.DB.prepare(
+        `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind('legacy-token-a', 'client-a', firstUserId, firstProfileId, 110, 1_000),
+      env.DB.prepare(
+        `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind('legacy-token-b', 'client-b', secondUserId, secondProfileId, 210, 2_000),
+      env.DB.prepare(
+        `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind('legacy-server-a', firstProfileId, firstUserId, 120, 1_000),
+      env.DB.prepare(
+        `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind('legacy-server-b', secondProfileId, secondUserId, 220, 2_000),
+      env.DB.prepare(
+        `INSERT INTO web_sessions (id, user_id, refresh_token_hash, csrf_token_hash, device_label, created_at, last_used_at, expires_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      ).bind('legacy-web-session', firstUserId, 'refresh-hash', 'csrf-hash', 'legacy device', 130, 140, 1_000),
+    ]);
+
+    await applyD1Migrations(env.DB, profileMigration, migrationTable);
+
     const profiles = await env.DB.prepare(
-      'SELECT id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at FROM profiles WHERE user_id = ? ORDER BY created_at ASC',
-    ).bind(userId).all<Record<string, unknown>>();
-    const tokenRow = await env.DB.prepare('SELECT profile_id FROM tokens WHERE access_token = ?').bind(`migration-token-${suffix}`).first<{ profile_id: string }>();
-    const sessionRow = await env.DB.prepare('SELECT profile_id FROM server_sessions WHERE server_id = ?').bind(`migration-server-${suffix}`).first<{ profile_id: string }>();
+      `SELECT id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at
+       FROM profiles ORDER BY id`,
+    ).all<Record<string, unknown>>();
+    expect(profiles.results).toEqual([
+      {
+        id: firstProfileId,
+        user_id: firstUserId,
+        name: 'LegacyHero',
+        skin_hash: 'skin-hash-a',
+        cape_hash: 'cape-hash-a',
+        skin_model: 'classic',
+        created_at: 100,
+        updated_at: 101,
+      },
+      {
+        id: secondProfileId,
+        user_id: secondUserId,
+        name: 'legacyh_22222222',
+        skin_hash: 'skin-hash-b',
+        cape_hash: null,
+        skin_model: 'slim',
+        created_at: 200,
+        updated_at: 201,
+      },
+    ]);
 
-    expect(userRow).toEqual({ default_profile_id: firstProfileId });
-    expect(profiles.results).toHaveLength(2);
-    expect(profiles.results[0]).toMatchObject({ id: firstProfileId, skin_hash: 'skin-hash', cape_hash: 'cape-hash', created_at: now, updated_at: now });
-    expect(tokenRow).toEqual({ profile_id: firstProfileId });
-    expect(sessionRow).toEqual({ profile_id: firstProfileId });
+    const users = await env.DB.prepare(
+      `SELECT id, email, password, salt, role, created_at, updated_at, default_profile_id
+       FROM users ORDER BY id`,
+    ).all<Record<string, unknown>>();
+    expect(users.results).toEqual([
+      {
+        id: firstUserId,
+        email: 'legacy-a@example.com',
+        password: 'hash-a',
+        salt: 'salt-a',
+        role: 'user',
+        created_at: 100,
+        updated_at: 101,
+        default_profile_id: firstProfileId,
+      },
+      {
+        id: secondUserId,
+        email: 'legacy-b@example.com',
+        password: 'hash-b',
+        salt: 'salt-b',
+        role: 'user',
+        created_at: 200,
+        updated_at: 201,
+        default_profile_id: secondProfileId,
+      },
+    ]);
+
+    await expect(env.DB.prepare(
+      `SELECT access_token, client_token, user_id, profile_id, created_at, expires_at
+       FROM tokens ORDER BY access_token`,
+    ).all<Record<string, unknown>>()).resolves.toMatchObject({
+      results: [
+        { access_token: 'legacy-token-a', client_token: 'client-a', user_id: firstUserId, profile_id: firstProfileId, created_at: 110, expires_at: 1_000 },
+        { access_token: 'legacy-token-b', client_token: 'client-b', user_id: secondUserId, profile_id: secondProfileId, created_at: 210, expires_at: 2_000 },
+      ],
+    });
+    await expect(env.DB.prepare(
+      `SELECT server_id, profile_id, user_id, created_at, expires_at
+       FROM server_sessions ORDER BY server_id`,
+    ).all<Record<string, unknown>>()).resolves.toMatchObject({
+      results: [
+        { server_id: 'legacy-server-a', profile_id: firstProfileId, user_id: firstUserId, created_at: 120, expires_at: 1_000 },
+        { server_id: 'legacy-server-b', profile_id: secondProfileId, user_id: secondUserId, created_at: 220, expires_at: 2_000 },
+      ],
+    });
+    await expect(env.DB.prepare(
+      `SELECT id, user_id, refresh_token_hash, csrf_token_hash, device_label, created_at, last_used_at, expires_at, revoked_at
+       FROM web_sessions`,
+    ).first<Record<string, unknown>>()).resolves.toEqual({
+      id: 'legacy-web-session',
+      user_id: firstUserId,
+      refresh_token_hash: 'refresh-hash',
+      csrf_token_hash: 'csrf-hash',
+      device_label: 'legacy device',
+      created_at: 130,
+      last_used_at: 140,
+      expires_at: 1_000,
+      revoked_at: null,
+    });
 
     await expect(env.DB.prepare(
       `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
        VALUES (?, ?, ?, NULL, NULL, 'classic', ?, ?)`,
-    ).bind(`c${suffix.slice(0, 31)}`, userId, `legacy${suffix.slice(0, 8)}`, now + 2, now + 2).run()).rejects.toThrow();
+    ).bind('33333333333333333333333333333333', firstUserId, 'LEGACYHERO', 300, 300).run()).rejects.toThrow();
+  });
+
+  it('manages profiles with real D1 and enforces names, quota, ownership, defaults, and deletion', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 6);
+    const ownerName = `Owner${suffix}`;
+    const registerResponse = await jsonRequest('/api/register', {
+      email: `profiles-${suffix}@example.com`,
+      password: PASSWORD,
+      name: ownerName,
+    });
+    expect(registerResponse.status).toBe(201);
+    const registerBody = await registerResponse.json() as { user: UserResponse };
+
+    const authenticateResponse = await jsonRequest('/authserver/authenticate', {
+      username: `profiles-${suffix}@example.com`,
+      password: PASSWORD,
+      clientToken: `profiles-client-${suffix}`,
+    });
+    expect(authenticateResponse.status).toBe(200);
+    const accessToken = (await authenticateResponse.json() as { accessToken: string }).accessToken;
+
+    const listResponse = await authenticatedRequest('/api/user/profiles', accessToken);
+    expect(listResponse.status).toBe(200);
+    await expect(listResponse.json()).resolves.toMatchObject({
+      defaultProfileId: registerBody.user.profile.id,
+      profiles: [{ id: registerBody.user.profile.id, name: ownerName }],
+    });
+
+    const duplicateResponse = await authenticatedJsonRequest('/api/user/profiles', accessToken, 'POST', { name: ownerName.toLowerCase() });
+    expect(duplicateResponse.status).toBe(409);
+    await expect(duplicateResponse.json()).resolves.toMatchObject({ errorCode: 'profile_name_taken' });
+
+    const createdProfileIds: string[] = [];
+    for (const name of [`Second${suffix}`, `Third${suffix}`, `Fourth${suffix}`, `Fifth${suffix}`]) {
+      const response = await authenticatedJsonRequest('/api/user/profiles', accessToken, 'POST', { name });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { profile: ProfileResponse };
+      createdProfileIds.push(body.profile.id);
+    }
+    const secondProfileId = createdProfileIds[0];
+
+    const renameConflict = await authenticatedJsonRequest(
+      `/api/user/profiles/${secondProfileId}`,
+      accessToken,
+      'PATCH',
+      { name: ownerName.toUpperCase() },
+    );
+    expect(renameConflict.status).toBe(409);
+    await expect(renameConflict.json()).resolves.toMatchObject({ errorCode: 'profile_name_taken' });
+
+    const renamed = await authenticatedJsonRequest(
+      `/api/user/profiles/${secondProfileId}`,
+      accessToken,
+      'PATCH',
+      { name: `Renamed${suffix}` },
+    );
+    expect(renamed.status).toBe(200);
+    await expect(renamed.json()).resolves.toMatchObject({ profile: { id: secondProfileId, name: `Renamed${suffix}` } });
+
+    const quotaResponse = await authenticatedJsonRequest('/api/user/profiles', accessToken, 'POST', { name: `Sixth${suffix}` });
+    expect(quotaResponse.status).toBe(409);
+    await expect(quotaResponse.json()).resolves.toMatchObject({ errorCode: 'profile_limit_reached' });
+
+    const otherSuffix = crypto.randomUUID().replaceAll('-', '').slice(0, 6);
+    const otherRegisterResponse = await jsonRequest('/api/register', {
+      email: `other-profiles-${otherSuffix}@example.com`,
+      password: PASSWORD,
+      name: `Other${otherSuffix}`,
+    });
+    expect(otherRegisterResponse.status).toBe(201);
+    const otherUser = await otherRegisterResponse.json() as { user: UserResponse };
+    const otherAuthenticateResponse = await jsonRequest('/authserver/authenticate', {
+      username: `other-profiles-${otherSuffix}@example.com`,
+      password: PASSWORD,
+    });
+    const otherAccessToken = (await otherAuthenticateResponse.json() as { accessToken: string }).accessToken;
+
+    const unauthorizedRename = await authenticatedJsonRequest(
+      `/api/user/profiles/${registerBody.user.profile.id}`,
+      otherAccessToken,
+      'PATCH',
+      { name: `Hijacked${otherSuffix}` },
+    );
+    expect(unauthorizedRename.status).toBe(404);
+    await expect(unauthorizedRename.json()).resolves.toMatchObject({ errorCode: 'profile_not_found' });
+    expect(otherUser.user.profile.id).not.toBe(registerBody.user.profile.id);
+
+    const selectDefault = await authenticatedJsonRequest(`/api/user/profiles/${secondProfileId}/default`, accessToken, 'PUT');
+    expect(selectDefault.status).toBe(200);
+    await expect(selectDefault.json()).resolves.toMatchObject({ defaultProfileId: secondProfileId });
+
+    const currentProfile = await authenticatedRequest('/api/user/profile', accessToken);
+    await expect(currentProfile.json()).resolves.toMatchObject({ user: { profile: { id: secondProfileId, name: `Renamed${suffix}` } } });
+
+    const deleteDefault = await authenticatedJsonRequest(`/api/user/profiles/${secondProfileId}`, accessToken, 'DELETE');
+    expect(deleteDefault.status).toBe(204);
+    const afterDefaultDeletion = await authenticatedRequest('/api/user/profiles', accessToken);
+    await expect(afterDefaultDeletion.json()).resolves.toMatchObject({
+      defaultProfileId: registerBody.user.profile.id,
+      profiles: expect.not.arrayContaining([{ id: secondProfileId }]),
+    });
+    const defaultRow = await env.DB.prepare('SELECT default_profile_id FROM users WHERE id = ?')
+      .bind(registerBody.user.id)
+      .first<{ default_profile_id: string }>();
+    expect(defaultRow).toEqual({ default_profile_id: registerBody.user.profile.id });
+
+    for (const profileId of createdProfileIds.slice(1)) {
+      const response = await authenticatedJsonRequest(`/api/user/profiles/${profileId}`, accessToken, 'DELETE');
+      expect(response.status).toBe(204);
+    }
+    const lastDelete = await authenticatedJsonRequest(`/api/user/profiles/${registerBody.user.profile.id}`, accessToken, 'DELETE');
+    expect(lastDelete.status).toBe(409);
+    await expect(lastDelete.json()).resolves.toMatchObject({ errorCode: 'last_profile' });
   });
 
   it('completes the account, texture, and server join path using D1 and R2', async () => {

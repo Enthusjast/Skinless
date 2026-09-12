@@ -6,6 +6,12 @@ DELETE FROM tokens;
 
 PRAGMA foreign_keys = OFF;
 
+-- Legacy 0001 compared names case-sensitively, so `Player` and `player` may
+-- already coexist. For each case-folded name, keep the oldest row unchanged;
+-- order ties by the profile UUID using binary comparison. Every later variant
+-- is renamed to its first seven name characters, an underscore, and the final
+-- eight hex characters of its unchanged UUID (maximum 16 valid name chars).
+
 CREATE TABLE profiles_new (
   id          TEXT PRIMARY KEY,
   user_id     TEXT NOT NULL,
@@ -22,13 +28,27 @@ INSERT INTO profiles_new (id, user_id, name, skin_hash, cape_hash, skin_model, c
 SELECT
   p.id,
   p.user_id,
-  p.name,
+  CASE WHEN EXISTS (
+    SELECT 1
+    FROM profiles older
+    INNER JOIN users older_user ON older_user.id = older.user_id
+    WHERE lower(older.name) = lower(p.name)
+      AND (
+        COALESCE(older_user.created_at, 0) < COALESCE(u.created_at, 0)
+        OR (
+          COALESCE(older_user.created_at, 0) = COALESCE(u.created_at, 0)
+          AND older.id < p.id
+        )
+      )
+  ) THEN substr(p.name, 1, 7) || '_' || substr(replace(lower(p.id), '-', ''), -8)
+  ELSE p.name END,
   p.skin_hash,
   p.cape_hash,
   p.skin_model,
   COALESCE((SELECT u.created_at FROM users u WHERE u.id = p.user_id), 0),
   COALESCE((SELECT u.updated_at FROM users u WHERE u.id = p.user_id), 0)
-FROM profiles p;
+FROM profiles p
+INNER JOIN users u ON u.id = p.user_id;
 
 DROP TABLE profiles;
 ALTER TABLE profiles_new RENAME TO profiles;
