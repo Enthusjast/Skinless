@@ -625,11 +625,17 @@ export async function updateUserRole(db: D1Database, userId: string, role: UserR
 }
 
 export async function countAssetReferences(db: D1Database, hash: string): Promise<number> {
-  const row = await db
-    .prepare('SELECT COUNT(*) AS count FROM profiles WHERE skin_hash = ? OR cape_hash = ?')
-    .bind(hash, hash)
-    .first<{ count: number }>();
-  return Number(row?.count ?? 0);
+  const [profileRow, wardrobeRow] = await Promise.all([
+    db
+      .prepare('SELECT COUNT(*) AS count FROM profiles WHERE skin_hash = ? OR cape_hash = ?')
+      .bind(hash, hash)
+      .first<{ count: number }>(),
+    db
+      .prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE hash = ?')
+      .bind(hash)
+      .first<{ count: number }>(),
+  ]);
+  return Number(profileRow?.count ?? 0) + Number(wardrobeRow?.count ?? 0);
 }
 
 export async function listUsers(db: D1Database, limit: number, offset: number): Promise<UserWithProfile[]> {

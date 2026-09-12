@@ -70,6 +70,7 @@ class MemoryD1 {
   public tokens = new Map<string, TokenRecord>();
   public sessions = new Map<string, { serverId: string; profileId: string; userId: string; expiresAt: number }>();
   public textures = new Map<string, TextureWardrobeRecord>();
+  public cleanups = new Map<string, { scheduledAt: number }>();
 
   prepare(sql: string): Statement {
     return new Statement(this, sql.replace(/\s+/g, ' ').trim());
@@ -246,6 +247,14 @@ class MemoryD1 {
     } else if (sql.startsWith('DELETE FROM tokens WHERE access_token')) {
       this.tokens.delete(String(values[0]));
       return 1;
+    } else if (sql.startsWith('INSERT INTO texture_cleanup')) {
+      const [hash, _objectKey, scheduledAt] = values;
+      if (this.cleanups.has(String(hash))) return 0;
+      this.cleanups.set(String(hash), { scheduledAt: Number(scheduledAt) });
+      return 1;
+    } else if (sql.startsWith('DELETE FROM texture_cleanup WHERE hash')) {
+      this.cleanups.delete(String(values[0]));
+      return 1;
     }
     return 0;
   }
@@ -283,7 +292,7 @@ async function registeredClient() {
 describe('management API', () => {
   beforeEach(() => clearLoginFailures());
 
-  it('registers a user, uploads a skin, and removes its unreferenced R2 object', async () => {
+  it('registers a user, uploads a skin, and defers R2 cleanup after profile removal', async () => {
     const { db, bucket, env, token } = await registeredClient();
     const mismatchForm = new FormData();
     mismatchForm.set('file', pngFile(nonCanonicalModernSkin));
@@ -314,6 +323,7 @@ describe('management API', () => {
     const remove = await app.request('/api/user/skin', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }, env);
     expect(remove.status).toBe(204);
     expect(bucket.files.size).toBe(1);
+    expect(db.cleanups.size).toBe(0);
   });
 
   it('rejects unsupported formats, invalid dimensions, fake headers, and truncated PNGs with stable codes', async () => {

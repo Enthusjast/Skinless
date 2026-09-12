@@ -1,8 +1,6 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import {
-  countAssetReferences,
-  countTextureRecordsByHash,
   countTexturesByUserId,
   countTexturesByUserIdAndType,
   countProfilesByUserId,
@@ -40,6 +38,7 @@ import {
   MAX_PROFILES_PER_USER,
   setDefaultProfile,
 } from '../db/queries';
+import { cancelTextureCleanup, scheduleTextureCleanup } from '../texture-cleanup';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import {
   admitLoginAttempt,
@@ -178,13 +177,9 @@ function assetHash(profile: ProfileRecord, asset: AssetKind): string | null {
   return asset === 'skin' ? profile.skin_hash : profile.cape_hash;
 }
 
-async function removeIfUnreferenced(c: Context<AppEnv>, hash: string | null): Promise<void> {
+async function scheduleIfUnreferenced(c: Context<AppEnv>, hash: string | null): Promise<void> {
   if (!hash) return;
-  const profileReferences = await countAssetReferences(c.env.DB, hash);
-  const wardrobeReferences = await countTextureRecordsByHash(c.env.DB, hash);
-  if (profileReferences === 0 && wardrobeReferences === 0) {
-    await c.env.BUCKET.delete(`${hash}.png`);
-  }
+  await scheduleTextureCleanup(c.env.DB, hash);
 }
 
 function textureNotFound(c: Context<AppEnv>): Response {
@@ -321,7 +316,7 @@ async function uploadAsset(
       if (!inserted) {
         const concurrent = await findTextureByUserHashAndType(c.env.DB, userId, hash, asset);
         if (!concurrent) {
-          await removeIfUnreferenced(c, hash);
+          await scheduleIfUnreferenced(c, hash);
           return textureQuotaReached(c);
         }
         texture = concurrent;
@@ -331,13 +326,21 @@ async function uploadAsset(
         }
       }
     } catch (error) {
-      if (!isConstraintViolation(error)) throw error;
+      if (!isConstraintViolation(error)) {
+        await scheduleIfUnreferenced(c, hash);
+        throw error;
+      }
       const concurrent = await findTextureByUserHashAndType(c.env.DB, userId, hash, asset);
-      if (!concurrent) throw error;
+      if (!concurrent) {
+        await scheduleIfUnreferenced(c, hash);
+        throw error;
+      }
       texture = concurrent;
       reused = true;
     }
   }
+
+  await cancelTextureCleanup(c.env.DB, hash);
 
   let nextProfile = profile;
   if (applyToDefaultProfile) {
@@ -355,7 +358,8 @@ async function uploadAsset(
     nextProfile = asset === 'skin'
       ? { ...profile, skin_hash: hash, skin_model: texture.model ?? profile.skin_model }
       : { ...profile, cape_hash: hash };
-    if (previousHash && previousHash !== hash) await removeIfUnreferenced(c, previousHash);
+    await cancelTextureCleanup(c.env.DB, hash);
+    if (previousHash && previousHash !== hash) await scheduleIfUnreferenced(c, previousHash);
   }
 
   const quota = await wardrobeQuota(c);
@@ -375,7 +379,7 @@ async function deleteAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   const profile = c.get('profile');
   const previousHash = assetHash(profile, asset);
   await updateProfileAsset(c.env.DB, profile.id, asset, null, profile.skin_model);
-  await removeIfUnreferenced(c, previousHash);
+  await scheduleIfUnreferenced(c, previousHash);
   return c.body(null, 204);
 }
 
@@ -441,7 +445,7 @@ async function deleteTexture(c: Context<AppEnv>): Promise<Response> {
     }
     return textureNotFound(c);
   }
-  await removeIfUnreferenced(c, texture.hash);
+  await scheduleIfUnreferenced(c, texture.hash);
   return c.body(null, 204);
 }
 
@@ -469,7 +473,8 @@ async function applyTexture(c: Context<AppEnv>): Promise<Response> {
     ? { ...profile, skin_hash: texture.hash, skin_model: texture.model ?? profile.skin_model }
     : { ...profile, cape_hash: texture.hash };
   if (c.get('profile').id === profile.id) c.set('profile', nextProfile);
-  if (previousHash && previousHash !== texture.hash) await removeIfUnreferenced(c, previousHash);
+  await cancelTextureCleanup(c.env.DB, texture.hash);
+  if (previousHash && previousHash !== texture.hash) await scheduleIfUnreferenced(c, previousHash);
   return c.json({ texture: serializeTexture(c, texture), profile: serializeProfile(nextProfile) });
 }
 
@@ -770,8 +775,8 @@ routes.delete('/user/profiles/:id', authMiddleware, async (c) => {
 
   const deleted = await deleteProfile(c.env.DB, profile.id, user.id);
   if (!deleted) return profileNotFound(c);
-  await removeIfUnreferenced(c, profile.skin_hash);
-  await removeIfUnreferenced(c, profile.cape_hash);
+  await scheduleIfUnreferenced(c, profile.skin_hash);
+  await scheduleIfUnreferenced(c, profile.cape_hash);
   return c.body(null, 204);
 });
 

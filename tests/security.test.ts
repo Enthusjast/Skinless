@@ -157,21 +157,25 @@ describe('security and operational safeguards', () => {
         prepare(sql: string) {
           cleanupQueries.push(sql);
           return {
-            bind(value: number) {
-              deletedBefore = value;
-              return { run: async () => ({ success: true }) };
+            bind(...values: number[]) {
+              deletedBefore = values[0] ?? 0;
+              return {
+                all: async () => ({ results: [] }),
+                run: async () => ({ success: true }),
+              };
             },
           };
         },
       },
-      BUCKET: {},
+      BUCKET: { delete: async () => undefined },
     };
 
     await worker.scheduled?.({} as ScheduledController, env as never, {} as ExecutionContext);
     expect(deletedBefore).toBeGreaterThan(0);
-    expect(cleanupQueries).toEqual([
+    expect(cleanupQueries.slice(0, 2)).toEqual([
       'DELETE FROM tokens WHERE expires_at < ?',
       'DELETE FROM server_sessions WHERE expires_at < ?',
     ]);
+    expect(cleanupQueries[2]).toContain('FROM texture_cleanup');
   });
 });

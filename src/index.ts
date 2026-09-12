@@ -7,6 +7,7 @@ import apiRoutes from './routes/api';
 import { corsMiddleware } from './middleware/cors';
 import { securityHeadersMiddleware } from './middleware/security';
 import { metadata } from './utils/config';
+import { processTextureCleanup } from './texture-cleanup';
 
 export { RateLimiterDurableObject } from './durable-objects/rate-limiter';
 
@@ -50,6 +51,7 @@ const worker: ExportedHandler<Bindings> = {
     const now = Date.now();
     await env.DB.prepare('DELETE FROM tokens WHERE expires_at < ?').bind(now).run();
     await env.DB.prepare('DELETE FROM server_sessions WHERE expires_at < ?').bind(now).run();
+    await processTextureCleanup(env.DB, env.BUCKET, now);
   },
 };
 
