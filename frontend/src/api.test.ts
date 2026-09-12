@@ -2,11 +2,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   changePassword,
+  createAdminInvite,
   formatApiError,
+  getAdminInvites,
+  getAdminSettings,
   login,
   refreshSession,
   register,
+  revokeAdminInvite,
   setCsrfToken,
+  updateAdminSettings,
 } from './api';
 
 afterEach(() => {
@@ -192,6 +197,118 @@ describe('adaptive Turnstile login payloads', () => {
       email: 'player@example.com',
       password: 'password',
       turnstileToken: 'turnstile-token',
+    });
+  });
+});
+
+describe('admin registration settings and invite requests', () => {
+  it('uses management requests and keeps the creation code separate from list payloads', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            settings: {
+              registrationMode: 'open',
+              maxProfilesPerUser: 5,
+              maxTexturesPerUser: 50,
+              enforceJoinIp: false,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            settings: {
+              registrationMode: 'invite',
+              maxProfilesPerUser: 4,
+              maxTexturesPerUser: 40,
+              enforceJoinIp: true,
+              createdAt: 1,
+              updatedAt: 2,
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ invites: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            invite: {
+              id: 'invite-1',
+              code: 'secret-code',
+              codePrefix: 'secret-c',
+              useCount: 0,
+              useLimit: 1,
+              expiresAt: null,
+              note: '',
+              revokedAt: null,
+              createdAt: 1,
+              updatedAt: 1,
+            },
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            invite: {
+              id: 'invite-1',
+              codePrefix: 'secret-c',
+              useCount: 0,
+              useLimit: 1,
+              expiresAt: null,
+              note: '',
+              revokedAt: 2,
+              createdAt: 1,
+              updatedAt: 2,
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getAdminSettings()).resolves.toMatchObject({
+      settings: { registrationMode: 'open' },
+    });
+    await updateAdminSettings({
+      registrationMode: 'invite',
+      maxProfilesPerUser: 4,
+      maxTexturesPerUser: 40,
+      enforceJoinIp: true,
+    });
+    await expect(getAdminInvites()).resolves.toEqual({ invites: [] });
+    await expect(
+      createAdminInvite({ useLimit: 1, expiresAt: null, note: '' }),
+    ).resolves.toMatchObject({
+      invite: { code: 'secret-code' },
+    });
+    await revokeAdminInvite('invite-1');
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/admin/settings',
+      '/api/admin/settings',
+      '/api/admin/invites',
+      '/api/admin/invites',
+      '/api/admin/invites/invite-1/revoke',
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      registrationMode: 'invite',
+      maxProfilesPerUser: 4,
+      maxTexturesPerUser: 40,
+      enforceJoinIp: true,
     });
   });
 });

@@ -14,7 +14,10 @@ import {
   findUserById,
   findProfileByIdForUser,
   findProfileByName,
+  findRegistrationInviteById,
+  findSiteSettings,
   insertProfileBelowLimit,
+  insertRegistrationInvite,
   insertTextureBelowLimit,
   insertUserAndProfile,
   insertWebSession,
@@ -23,16 +26,19 @@ import {
   listTextureProfileReferences,
   listTexturesByUserId,
   listProfilesByUserId,
+  listRegistrationInvites,
   findWebSessionById,
   listWebSessions,
   revokeWebSession,
   revokeOtherWebSessions,
+  revokeRegistrationInvite,
   revokeUserWebSessions,
   rotateWebSession,
   updatePassword,
   updateProfileName,
   updateProfileAsset,
   updateProfileAssetIfTextureExists,
+  updateSiteSettings,
   updateTextureName,
   updateUserRole,
   MAX_PROFILES_PER_USER,
@@ -80,6 +86,11 @@ import {
   setWebSessionCookies,
 } from '../utils/session';
 import type { AppEnv, ProfileRecord, SkinModel, UserRecord, UserRole, WebSessionRecord } from '../types';
+import {
+  parseInviteInput,
+  parseRegistrationSettings,
+  type RegistrationSettingsValues,
+} from '../utils/registration';
 
 interface RegisterInput {
   email?: unknown;
@@ -108,6 +119,18 @@ interface ProfileNameInput {
 
 interface WardrobeApplyInput {
   profileId?: unknown;
+}
+
+interface RegistrationSettingsInput {
+  registrationMode?: unknown;
+  registration_mode?: unknown;
+  mode?: unknown;
+  maxProfilesPerUser?: unknown;
+  max_profiles_per_user?: unknown;
+  maxTexturesPerUser?: unknown;
+  max_textures_per_user?: unknown;
+  enforceJoinIp?: unknown;
+  enforce_join_ip?: unknown;
 }
 
 type MultipartBody = Record<string, string | File | (string | File)[]>;
@@ -202,6 +225,58 @@ function textureNameInvalid(c: Context<AppEnv>): Response {
 
 function textureModelMismatch(c: Context<AppEnv>): Response {
   return jsonError(c, 409, 'The texture model does not match the target profile.', 'Conflict', 'texture_model_mismatch');
+}
+
+function serializeSiteSettings(record: {
+  registration_mode: RegistrationSettingsValues['registrationMode'];
+  max_profiles_per_user: number;
+  max_textures_per_user: number;
+  enforce_join_ip: number;
+  created_at: number;
+  updated_at: number;
+}) {
+  return {
+    registrationMode: record.registration_mode,
+    maxProfilesPerUser: record.max_profiles_per_user,
+    maxTexturesPerUser: record.max_textures_per_user,
+    enforceJoinIp: record.enforce_join_ip === 1,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
+  };
+}
+
+function serializeRegistrationInvite(
+  invite: {
+    id: string;
+    code_prefix: string;
+    created_by: string;
+    use_count: number;
+    use_limit: number;
+    expires_at: number | null;
+    note: string;
+    revoked_at: number | null;
+    created_at: number;
+    updated_at: number;
+  },
+  code?: string,
+) {
+  return {
+    id: invite.id,
+    ...(code ? { code } : {}),
+    codePrefix: invite.code_prefix,
+    createdBy: invite.created_by,
+    useCount: invite.use_count,
+    useLimit: invite.use_limit,
+    expiresAt: invite.expires_at,
+    note: invite.note,
+    revokedAt: invite.revoked_at,
+    createdAt: invite.created_at,
+    updatedAt: invite.updated_at,
+  };
+}
+
+function validationError(c: Context<AppEnv>, result: { code: string; message: string }): Response {
+  return jsonError(c, 400, result.message, 'IllegalArgumentException', result.code);
 }
 
 function serializeTexture(c: Context<AppEnv>, texture: TextureWardrobeRecord) {
@@ -860,5 +935,95 @@ routes.put('/admin/users/:id/role', authMiddleware, adminMiddleware, async (c) =
   await updateUserRole(c.env.DB, user.id, role as UserRole, Date.now());
   return c.json({ user: { ...serializeUser(user), role } });
 });
+
+async function adminSettings(c: Context<AppEnv>): Promise<Response> {
+  const record = await findSiteSettings(c.env.DB);
+  if (!record) {
+    return jsonError(c, 500, 'Registration settings are not initialized.', 'InternalServerError', 'internal_server_error');
+  }
+  return c.json({ settings: serializeSiteSettings(record) });
+}
+
+async function updateAdminSettings(c: Context<AppEnv>): Promise<Response> {
+  const record = await findSiteSettings(c.env.DB);
+  if (!record) {
+    return jsonError(c, 500, 'Registration settings are not initialized.', 'InternalServerError', 'internal_server_error');
+  }
+  const body = await readJson<RegistrationSettingsInput>(c);
+  const input = body
+    ? {
+      registrationMode: body.registrationMode ?? body.registration_mode ?? body.mode,
+      maxProfilesPerUser: body.maxProfilesPerUser ?? body.max_profiles_per_user,
+      maxTexturesPerUser: body.maxTexturesPerUser ?? body.max_textures_per_user,
+      enforceJoinIp: body.enforceJoinIp ?? body.enforce_join_ip,
+    }
+    : null;
+  const parsed = parseRegistrationSettings(input, {
+    registrationMode: record.registration_mode,
+    maxProfilesPerUser: record.max_profiles_per_user,
+    maxTexturesPerUser: record.max_textures_per_user,
+    enforceJoinIp: record.enforce_join_ip === 1,
+  });
+  if (!parsed.ok) return validationError(c, parsed);
+
+  const updatedAt = Date.now();
+  await updateSiteSettings(c.env.DB, parsed.value, updatedAt);
+  const updated = await findSiteSettings(c.env.DB);
+  if (!updated) {
+    return jsonError(c, 500, 'Registration settings could not be saved.', 'InternalServerError', 'internal_server_error');
+  }
+  return c.json({ settings: serializeSiteSettings(updated) });
+}
+
+routes.get('/admin/settings', authMiddleware, adminMiddleware, adminSettings);
+routes.patch('/admin/settings', authMiddleware, adminMiddleware, updateAdminSettings);
+routes.put('/admin/settings', authMiddleware, adminMiddleware, updateAdminSettings);
+
+routes.get('/admin/invites', authMiddleware, adminMiddleware, async (c) => {
+  const rawLimit = Number(c.req.query('limit') ?? '100');
+  const rawOffset = Number(c.req.query('offset') ?? '0');
+  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 100;
+  const offset = Number.isInteger(rawOffset) ? Math.max(rawOffset, 0) : 0;
+  const invites = await listRegistrationInvites(c.env.DB, limit, offset);
+  return c.json({ invites: invites.map((invite) => serializeRegistrationInvite(invite)) });
+});
+
+routes.post('/admin/invites', authMiddleware, adminMiddleware, async (c) => {
+  const body = await readJson<Record<string, unknown>>(c);
+  const now = Date.now();
+  const parsed = parseInviteInput(body, now);
+  if (!parsed.ok) return validationError(c, parsed);
+
+  const code = createOpaqueToken();
+  const invite = {
+    id: generateUserId(),
+    code_hash: await hashSessionToken(code),
+    code_prefix: code.slice(0, 8),
+    created_by: c.get('user').id,
+    use_count: 0,
+    use_limit: parsed.value.useLimit,
+    expires_at: parsed.value.expiresAt,
+    note: parsed.value.note,
+    revoked_at: null,
+    created_at: now,
+    updated_at: now,
+  };
+  await insertRegistrationInvite(c.env.DB, invite);
+  return c.json({ invite: serializeRegistrationInvite(invite, code) }, 201);
+});
+
+async function revokeAdminInvite(c: Context<AppEnv>): Promise<Response> {
+  const id = c.req.param('id') ?? '';
+  const invite = await findRegistrationInviteById(c.env.DB, id);
+  if (!invite) return jsonError(c, 404, 'Invite not found.', 'NotFound', 'invite_not_found');
+  if (!invite.revoked_at) await revokeRegistrationInvite(c.env.DB, id, Date.now());
+  const revoked = await findRegistrationInviteById(c.env.DB, id);
+  if (!revoked) return jsonError(c, 404, 'Invite not found.', 'NotFound', 'invite_not_found');
+  return c.json({ invite: serializeRegistrationInvite(revoked) });
+}
+
+routes.post('/admin/invites/:id/revoke', authMiddleware, adminMiddleware, revokeAdminInvite);
+routes.put('/admin/invites/:id/revoke', authMiddleware, adminMiddleware, revokeAdminInvite);
+routes.delete('/admin/invites/:id', authMiddleware, adminMiddleware, revokeAdminInvite);
 
 export default routes;

@@ -5,8 +5,11 @@ import type {
   UserRole,
   UserWithProfile,
   SkinModel,
+  RegistrationInviteRecord,
+  SiteSettingsRecord,
   WebSessionRecord,
 } from '../types';
+import type { RegistrationSettingsValues } from '../utils/registration';
 import type { TextureType, TextureWardrobeRecord } from '../utils/wardrobe';
 
 export interface TokenContextRow extends TokenRecord {
@@ -343,6 +346,96 @@ export async function listWebSessions(db: D1Database, userId: string, now = Date
     .bind(userId, now)
     .all<WebSessionSummary>();
   return result.results;
+}
+
+export async function findSiteSettings(db: D1Database): Promise<SiteSettingsRecord | null> {
+  return db.prepare('SELECT * FROM site_settings WHERE id = 1 LIMIT 1').first<SiteSettingsRecord>();
+}
+
+export async function updateSiteSettings(
+  db: D1Database,
+  settings: RegistrationSettingsValues,
+  updatedAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE site_settings
+       SET registration_mode = ?, max_profiles_per_user = ?, max_textures_per_user = ?, enforce_join_ip = ?, updated_at = ?
+       WHERE id = 1`,
+    )
+    .bind(
+      settings.registrationMode,
+      settings.maxProfilesPerUser,
+      settings.maxTexturesPerUser,
+      settings.enforceJoinIp ? 1 : 0,
+      updatedAt,
+    )
+    .run();
+}
+
+export async function insertRegistrationInvite(
+  db: D1Database,
+  invite: RegistrationInviteRecord,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO registration_invites
+       (id, code_hash, code_prefix, created_by, use_count, use_limit, expires_at, note, revoked_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      invite.id,
+      invite.code_hash,
+      invite.code_prefix,
+      invite.created_by,
+      invite.use_count,
+      invite.use_limit,
+      invite.expires_at,
+      invite.note,
+      invite.revoked_at,
+      invite.created_at,
+      invite.updated_at,
+    )
+    .run();
+}
+
+export async function findRegistrationInviteById(
+  db: D1Database,
+  id: string,
+): Promise<RegistrationInviteRecord | null> {
+  return db.prepare('SELECT * FROM registration_invites WHERE id = ? LIMIT 1').bind(id).first<RegistrationInviteRecord>();
+}
+
+export async function listRegistrationInvites(
+  db: D1Database,
+  limit = 100,
+  offset = 0,
+): Promise<RegistrationInviteRecord[]> {
+  const result = await db
+    .prepare(
+      `SELECT * FROM registration_invites
+       ORDER BY created_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(limit, offset)
+    .all<RegistrationInviteRecord>();
+  return result.results;
+}
+
+export async function revokeRegistrationInvite(
+  db: D1Database,
+  id: string,
+  revokedAt: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE registration_invites
+       SET revoked_at = ?, updated_at = ?
+       WHERE id = ? AND revoked_at IS NULL`,
+    )
+    .bind(revokedAt, revokedAt, id)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function revokeOtherWebSessions(

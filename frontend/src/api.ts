@@ -78,6 +78,31 @@ export interface WebSession {
 
 export type AdminUser = ApiUser;
 
+export type RegistrationMode = 'open' | 'invite' | 'closed';
+
+export interface AdminRegistrationSettings {
+  registrationMode: RegistrationMode;
+  maxProfilesPerUser: number;
+  maxTexturesPerUser: number;
+  enforceJoinIp: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AdminInvite {
+  id: string;
+  code?: string;
+  codePrefix: string;
+  createdBy: string;
+  useCount: number;
+  useLimit: number;
+  expiresAt: number | null;
+  note: string;
+  revokedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export class ApiError extends Error {
   public constructor(
     public readonly status: number,
@@ -443,4 +468,42 @@ export function updateUserRole(userId: string, role: 'user' | 'admin'): Promise<
     method: 'PUT',
     body: JSON.stringify({ role }),
   });
+}
+
+export function getAdminSettings(): Promise<{ settings: AdminRegistrationSettings }> {
+  return managementRequest<{ settings: AdminRegistrationSettings }>('/api/admin/settings');
+}
+
+export function updateAdminSettings(
+  settings: Pick<
+    AdminRegistrationSettings,
+    'registrationMode' | 'maxProfilesPerUser' | 'maxTexturesPerUser' | 'enforceJoinIp'
+  >,
+): Promise<{ settings: AdminRegistrationSettings }> {
+  return managementRequest<{ settings: AdminRegistrationSettings }>('/api/admin/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(settings),
+  });
+}
+
+export function getAdminInvites(): Promise<{ invites: AdminInvite[] }> {
+  return managementRequest<{ invites: AdminInvite[] }>('/api/admin/invites');
+}
+
+export function createAdminInvite(input: {
+  useLimit: number;
+  expiresAt: number | null;
+  note: string;
+}): Promise<{ invite: AdminInvite & { code: string } }> {
+  return managementRequest<{ invite: AdminInvite & { code: string } }>('/api/admin/invites', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function revokeAdminInvite(inviteId: string): Promise<{ invite: AdminInvite }> {
+  return managementRequest<{ invite: AdminInvite }>(
+    `/api/admin/invites/${encodeURIComponent(inviteId)}/revoke`,
+    { method: 'POST' },
+  );
 }
