@@ -87,6 +87,24 @@ describe('cookie-backed auth store', () => {
     );
   });
 
+  it('clears local auth state when the network logout request fails', async () => {
+    localStorage.setItem('skinless.session', 'legacy-session');
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network offline'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const auth = useAuthStore();
+    auth.user = user;
+    await expect(auth.logout()).resolves.toBeUndefined();
+
+    expect(auth.user).toBeNull();
+    expect(auth.isAuthenticated).toBe(false);
+    expect(localStorage.getItem('skinless.session')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/logout',
+      expect.objectContaining({ credentials: 'same-origin', method: 'POST' }),
+    );
+  });
+
   it('refreshes once when the initial cookie profile request is unauthorized', async () => {
     const fetchMock = vi
       .fn()

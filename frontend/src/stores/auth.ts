@@ -59,11 +59,9 @@ export const useAuthStore = defineStore('auth', {
       return register(email, password, name);
     },
     async logout() {
-      try {
-        await logoutWithCookies();
-      } finally {
-        this.clearSession();
-      }
+      const request = logoutWithCookies();
+      this.clearSession();
+      await request.catch(() => undefined);
     },
     async updatePassword(currentPassword: string, newPassword: string) {
       if (!this.user) throw new Error('Not authenticated');

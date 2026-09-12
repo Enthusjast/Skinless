@@ -73,6 +73,60 @@ describe('management session requests', () => {
     );
   });
 
+  it('shares one refresh request and rotated CSRF token across concurrent 401 responses', async () => {
+    let resolveRefresh!: (response: Response) => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      const fetchMock = vi.fn(async () => {
+        if (fetchMock.mock.calls.length <= 2) {
+          return new Response(
+            JSON.stringify({ errorMessage: 'expired', errorCode: 'Unauthorized' }),
+            {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        }
+        if (fetchMock.mock.calls.length === 3) {
+          resolve();
+          return new Promise<Response>((refreshResolve) => {
+            resolveRefresh = refreshResolve;
+          });
+        }
+        return new Response(null, { status: 204 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+    });
+    setCsrfToken('expired-csrf');
+
+    const first = changePassword('current-password', 'new-password');
+    const second = changePassword('current-password', 'new-password');
+    await refreshStarted;
+    resolveRefresh(
+      new Response(JSON.stringify({ user: {}, csrfToken: 'rotated-csrf' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+
+    const fetchMock = vi.mocked(fetch);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/user/password',
+      '/api/user/password',
+      '/api/auth/refresh',
+      '/api/user/password',
+      '/api/user/password',
+    ]);
+    expect(new Headers(fetchMock.mock.calls[3]?.[1]?.headers).get('X-CSRF-Token')).toBe(
+      'rotated-csrf',
+    );
+    expect(new Headers(fetchMock.mock.calls[4]?.[1]?.headers).get('X-CSRF-Token')).toBe(
+      'rotated-csrf',
+    );
+  });
+
   it('does not retry the refresh request when refresh itself is unauthorized', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ errorMessage: 'expired', errorCode: 'Unauthorized' }), {

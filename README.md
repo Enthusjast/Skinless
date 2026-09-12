@@ -11,7 +11,7 @@ Skinless 使用 Hono + TypeScript 运行在 Workers，D1 保存账号和 token�
 - 邮箱注册、密码修改、皮肤/披风上传删除
 - Classic（Steve）和 Slim（Alex）模型选择、CSS 2D 预览
 - 基础管理员用户列表和角色修改
-- PBKDF2-SHA256 密码哈希、Bearer token、PNG 尺寸校验、CORS、登录失败限制和 Cron token 清理
+- PBKDF2-SHA256 密码哈希、管理端同源 Cookie 会话、Yggdrasil Bearer token、PNG 尺寸校验、CORS、登录失败限制和 Cron token 清理
 
 ## 开发环境
 
@@ -34,7 +34,7 @@ Vite 会把 `/api`、`/authserver`、`/sessionserver` 和 `/textures` 代理到�
 VITE_API_BASE_URL=
 ```
 
-如果 API 部署在外部 origin，必须显式配置绝对 URL，并同步修改 Pages CSP 的 `connect-src`/`img-src`、路由和 CORS；默认 `_headers` 只允许同源请求。
+管理端使用同源 Cookie 会话，生产环境应让前端和 Worker 通过同一个站点提供 `/api`、`/authserver`、`/sessionserver` 和 `/textures` 路径，并保持 `VITE_API_BASE_URL` 为空。默认 `_headers` 只允许同源请求。
 
 ## 验证命令
 
@@ -80,7 +80,7 @@ pnpm exec wrangler deploy --dry-run
    wrangler deploy
    ```
 
-4. 在 Cloudflare Pages 创建前端项目，构建命令使用 `pnpm --filter @skinless/frontend build`，输出目录为 `frontend/dist`。同源部署保持 `VITE_API_BASE_URL` 为空；如果 API 使用外部 origin，必须显式更新 Pages CSP 的 `connect-src`/`img-src`、路由和 CORS 后再配置绝对 URL。
+4. 在 Cloudflare Pages 创建前端项目，构建命令使用 `pnpm --filter @skinless/frontend build`，输出目录为 `frontend/dist`。将 Worker 的管理 API 通过前端生产站点的同源路径提供，并保持 `VITE_API_BASE_URL` 为空，以便浏览器发送 Cookie 会话。
 
 5. 注册首个账号后，用 D1 手动提升管理员角色：
 
@@ -111,6 +111,6 @@ HMCL/PCL2 等启动器选择“外置登录（Authlib Injector）”，认证服
 
 - 密码使用 Workers Web Crypto PBKDF2-SHA256（100,000 次迭代），数据库不保存明文密码。
 - Worker 校验 PNG 魔数、尺寸和 64 KB 大小限制；图片处理在浏览器 Canvas 中完成。
-- API 不使用 Cookie，管理接口需要 Bearer token 且 `role=admin`。
+- 管理接口使用 HttpOnly 同源 Cookie 会话和 CSRF token；Yggdrasil 协议接口继续使用 Bearer token，管理员接口额外要求 `role=admin`。
 - 登录失败限制当前按 Worker 实例内存计数，适合 v1 小规模部署；若需要跨实例的严格全局限制，应替换为 Durable Object 或 KV 方案。
 - v1 不生成 RSA textures signature；主流 Authlib Injector 和启动器可在无签名时工作。

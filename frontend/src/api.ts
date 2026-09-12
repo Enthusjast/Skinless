@@ -72,6 +72,7 @@ export function formatApiError(cause: unknown, fallback: string): string {
 }
 
 let csrfToken: string | null = null;
+let refreshPromise: Promise<WebAuthResponse> | null = null;
 
 export function setCsrfToken(value: string | null): void {
   csrfToken = value?.trim() || null;
@@ -233,7 +234,17 @@ export function login(email: string, password: string): Promise<WebAuthResponse>
 }
 
 export function refreshSession(): Promise<WebAuthResponse> {
-  return managementRequest<WebAuthResponse>('/api/auth/refresh', { method: 'POST' }, false);
+  if (refreshPromise) return refreshPromise;
+
+  const requestPromise = managementRequest<WebAuthResponse>(
+    '/api/auth/refresh',
+    { method: 'POST' },
+    false,
+  );
+  refreshPromise = requestPromise.finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
 }
 
 export function logout(): Promise<void> {
