@@ -30,6 +30,7 @@ export class ApiError extends Error {
   public constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -65,7 +66,14 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
       typeof body.errorMessage === 'string'
         ? body.errorMessage
         : `Request failed with status ${response.status}.`;
-    throw new ApiError(response.status, message);
+    const code =
+      typeof body === 'object' &&
+      body !== null &&
+      'errorCode' in body &&
+      typeof body.errorCode === 'string'
+        ? body.errorCode
+        : undefined;
+    throw new ApiError(response.status, message, code);
   }
   return body as T;
 }

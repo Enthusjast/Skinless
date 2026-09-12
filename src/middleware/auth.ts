@@ -1,9 +1,10 @@
 import type { MiddlewareHandler } from 'hono';
 import type { AppEnv, ProfileRecord, TokenRecord, UserRecord } from '../types';
 import { findTokenContext } from '../db/queries';
+import { jsonError } from '../utils/errors';
 
 function unauthorized(c: Parameters<MiddlewareHandler<AppEnv>>[0], message: string): Response {
-  return c.json({ error: 'Unauthorized', errorMessage: message }, 401);
+  return jsonError(c, 401, message, 'Unauthorized', 'unauthorized');
 }
 
 export const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -48,7 +49,7 @@ export const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
 
 export const adminMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (c.get('user').role !== 'admin') {
-    return c.json({ error: 'Forbidden', errorMessage: 'Administrator access is required.' }, 403);
+    return jsonError(c, 403, 'Administrator access is required.', 'Forbidden', 'forbidden');
   }
   await next();
 };

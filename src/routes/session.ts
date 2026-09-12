@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { createServerSession, findJoinedProfile, findProfileById, findTokenContext } from '../db/queries';
 import { getPublicBaseUrl } from '../utils/config';
-import { jsonError, readJson, yggError } from '../utils/errors';
+import { readJson, yggError } from '../utils/errors';
 import { createTexturesProperty } from '../utils/textures';
 import { isProfileId } from '../utils/uuid';
 import type { AppEnv, ProfileRecord } from '../types';
@@ -36,7 +36,7 @@ routes.get('/sessionserver/session/minecraft/hasJoined', async (c) => {
   const username = c.req.query('username');
   const serverId = c.req.query('serverId');
   if (!username || serverId === undefined) {
-    return jsonError(c, 400, 'username and serverId are required.');
+    return yggError(c, 400, 'username and serverId are required.', 'IllegalArgumentException');
   }
 
   c.header('Cache-Control', 'public, max-age=60');

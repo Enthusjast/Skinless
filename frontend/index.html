@@ -5,22 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b1220" />
     <title>Skinless · Minecraft 皮肤站</title>
+    <script src="/theme-bootstrap.js"></script>
   </head>
   <body>
     <div id="app"></div>
-    <script>
-      try {
-        const saved = localStorage.getItem('skinless.theme');
-        const theme =
-          saved === 'light' || saved === 'dark'
-            ? saved
-            : window.matchMedia('(prefers-color-scheme: light)').matches
-              ? 'light'
-              : 'dark';
-        document.documentElement.dataset.theme = theme;
-        document.documentElement.style.colorScheme = theme;
-      } catch (_) {}
-    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

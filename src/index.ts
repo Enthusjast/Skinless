@@ -5,10 +5,17 @@ import sessionRoutes from './routes/session';
 import textureRoutes from './routes/textures';
 import apiRoutes from './routes/api';
 import { corsMiddleware } from './middleware/cors';
+import { securityHeadersMiddleware } from './middleware/security';
 import { metadata } from './utils/config';
 
 export const app = new Hono<AppEnv>();
 
+function isManagementApiPath(path: string): boolean {
+  const isYggdrasilPath = path === '/api/yggdrasil' || path.startsWith('/api/yggdrasil/');
+  return path === '/api' || (path.startsWith('/api/') && !isYggdrasilPath);
+}
+
+app.use('*', securityHeadersMiddleware);
 app.use('*', corsMiddleware);
 app.get('/', metadata);
 app.get('/api/yggdrasil', metadata);
@@ -23,10 +30,17 @@ app.route('/api', apiRoutes);
 
 app.onError((error, c) => {
   console.error(error);
-  return c.json({ error: 'InternalServerError', errorMessage: 'Internal server error.' }, 500);
+  const response = { error: 'InternalServerError', errorMessage: 'Internal server error.' };
+  return c.json(
+    isManagementApiPath(c.req.path) ? { ...response, errorCode: 'internal_server_error' } : response,
+    500,
+  );
 });
 
-app.notFound((c) => c.json({ error: 'NotFound', errorMessage: 'Resource not found.' }, 404));
+app.notFound((c) => {
+  const response = { error: 'NotFound', errorMessage: 'Resource not found.' };
+  return c.json(isManagementApiPath(c.req.path) ? { ...response, errorCode: 'not_found' } : response, 404);
+});
 
 const worker: ExportedHandler<Bindings> = {
   fetch: app.fetch,
