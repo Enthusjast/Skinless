@@ -466,7 +466,7 @@ describe('Cloudflare runtime integration', () => {
     };
     expect(registerBody.user).toMatchObject({
       email: EMAIL,
-      role: 'admin',
+      role: 'user',
       profile: {
         name: PROFILE_NAME,
         skinHash: null,
@@ -479,7 +479,7 @@ describe('Cloudflare runtime integration', () => {
       .prepare('SELECT id, email, password, role FROM users WHERE id = ?')
       .bind(registerBody.user.id)
       .first<{ id: string; email: string; password: string; role: string }>();
-    expect(userRow).toMatchObject({ id: registerBody.user.id, email: EMAIL, role: 'admin' });
+    expect(userRow).toMatchObject({ id: registerBody.user.id, email: EMAIL, role: 'user' });
     expect(userRow?.password).not.toBe(PASSWORD);
 
     const profileRow = await env.DB

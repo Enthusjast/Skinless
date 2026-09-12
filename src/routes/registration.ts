@@ -15,6 +15,7 @@ import {
   incrementRegistrationChallengeAttempts,
   insertPendingRegistration,
   isConstraintViolation,
+  updatePendingRegistration,
   updateRegistrationChallenge,
 } from "../db/queries";
 import {
@@ -417,12 +418,11 @@ routes.post("/register/start", async (c) => {
     pendingByEmail && pendingByEmail.expires_at > now ? pendingByEmail : null;
   const activePendingByName =
     pendingByName && pendingByName.expires_at > now ? pendingByName : null;
-  if (
-    existingUser ||
-    existingProfile ||
-    activePendingByEmail ||
-    activePendingByName
-  ) {
+  const conflictingPendingByName =
+    activePendingByName && activePendingByName.id !== activePendingByEmail?.id
+      ? activePendingByName
+      : null;
+  if (existingUser || existingProfile || conflictingPendingByName) {
     return duplicateRegistration(c);
   }
 
@@ -440,28 +440,38 @@ routes.post("/register/start", async (c) => {
 
   const salt = createSalt();
   const pending: PendingRegistrationRecord = {
-    id: generateUserId(),
+    id: activePendingByEmail?.id ?? generateUserId(),
     email,
     password_hash: await hashPassword(password, salt),
     salt,
     profile_name: name,
-    invite_id: invite?.id ?? null,
-    created_at: sentAt,
+    invite_id: invite?.id ?? activePendingByEmail?.invite_id ?? null,
+    created_at: activePendingByEmail?.created_at ?? sentAt,
     updated_at: sentAt,
     expires_at: expiresAt,
   };
   const challenge: RegistrationChallengeRecord = {
-    id: pending.id,
+    id: activePendingByEmail?.challenge_id ?? pending.id,
     pending_registration_id: pending.id,
     code_hash: await sha256Hex(new TextEncoder().encode(code)),
     attempts: 0,
     last_sent_at: sentAt,
     expires_at: expiresAt,
-    created_at: sentAt,
+    created_at: activePendingByEmail?.challenge_created_at ?? sentAt,
     updated_at: sentAt,
   };
   try {
-    await insertPendingRegistration(c.env.DB, pending, challenge);
+    if (activePendingByEmail) {
+      const updated = await updatePendingRegistration(
+        c.env.DB,
+        pending,
+        challenge,
+        sentAt,
+      );
+      if (!updated) return duplicateRegistration(c);
+    } else {
+      await insertPendingRegistration(c.env.DB, pending, challenge);
+    }
   } catch (error) {
     if (isConstraintViolation(error)) return duplicateRegistration(c);
     throw error;
@@ -550,15 +560,15 @@ routes.post("/register/verify", async (c) => {
   if (pending.invite_id && !(await inviteForPending(c, pending, now)))
     return invalidInvite(c, false);
 
+  const bootstrapEmail = c.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+  const bootstrapAdmin =
+    Boolean(bootstrapEmail) && bootstrapEmail === pending.email;
   const user: UserRecord = {
     id: generateUserId(),
     email: pending.email,
     password: pending.password_hash,
     salt: pending.salt,
-    role:
-      c.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase() === pending.email
-        ? "admin"
-        : "user",
+    role: bootstrapAdmin ? "admin" : "user",
     created_at: now,
     updated_at: now,
     email_verified_at: now,
@@ -576,14 +586,12 @@ routes.post("/register/verify", async (c) => {
   };
 
   try {
-    const configuredBootstrap = c.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase() === pending.email;
-    const bootstrapEnabled = !c.env.BOOTSTRAP_ADMIN_EMAIL?.trim() || configuredBootstrap;
     const created = await completePendingRegistration(
       c.env.DB,
       pending,
       user,
       profile,
-      bootstrapEnabled,
+      bootstrapAdmin,
     );
     if (!created) return duplicateRegistration(c);
   } catch (error) {

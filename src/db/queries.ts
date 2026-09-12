@@ -684,6 +684,57 @@ export async function insertPendingRegistration(
   ]);
 }
 
+export async function updatePendingRegistration(
+  db: D1Database,
+  pending: PendingRegistrationRecord,
+  challenge: RegistrationChallengeRecord,
+  now: number,
+): Promise<boolean> {
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE pending_registrations
+         SET email = ?, password_hash = ?, salt = ?, profile_name = ?, invite_id = ?,
+             updated_at = ?, expires_at = ?
+         WHERE id = ? AND expires_at > ?`,
+      )
+      .bind(
+        pending.email,
+        pending.password_hash,
+        pending.salt,
+        pending.profile_name,
+        pending.invite_id,
+        pending.updated_at,
+        pending.expires_at,
+        pending.id,
+        now,
+      ),
+    db
+      .prepare(
+        `UPDATE registration_challenges
+         SET code_hash = ?, attempts = 0, last_sent_at = ?, expires_at = ?, updated_at = ?
+         WHERE id = ? AND pending_registration_id = ? AND expires_at > ?`,
+      )
+      .bind(
+        challenge.code_hash,
+        challenge.last_sent_at,
+        challenge.expires_at,
+        challenge.updated_at,
+        challenge.id,
+        challenge.pending_registration_id,
+        now,
+      ),
+  ]);
+  const pendingUpdate = results[0] as
+    { meta?: { changes?: number } } | undefined;
+  const challengeUpdate = results[1] as
+    { meta?: { changes?: number } } | undefined;
+  return (
+    (pendingUpdate?.meta?.changes ?? 0) > 0 &&
+    (challengeUpdate?.meta?.changes ?? 0) > 0
+  );
+}
+
 export async function updateRegistrationChallenge(
   db: D1Database,
   pendingRegistrationId: string,
@@ -771,7 +822,7 @@ export async function completePendingRegistration(
         `INSERT INTO users
          (id, email, password, salt, role, created_at, updated_at, default_profile_id, email_verified_at, status)
          SELECT ?, ?, ?, ?,
-           CASE WHEN ? = 1 OR NOT EXISTS (SELECT 1 FROM users) THEN 'admin' ELSE ? END,
+           CASE WHEN ? = 1 THEN 'admin' ELSE ? END,
            ?, ?, NULL, ?, ?
          WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = ? COLLATE NOCASE)
            AND NOT EXISTS (SELECT 1 FROM profiles WHERE name = ? COLLATE NOCASE)

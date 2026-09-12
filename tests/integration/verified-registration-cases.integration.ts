@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, describe, expect, it } from 'vitest';
 import { app } from '../../src/index';
-import { hashPassword } from '../../src/utils/crypto';
+import { hashPassword, verifyPassword } from '../../src/utils/crypto';
 import { hashSessionToken } from '../../src/utils/session';
 import { registerVerifiedAccount } from './verified-registration-fixture';
 
@@ -107,7 +107,7 @@ describe('verified registration policy and delivery', () => {
     ).resolves.toBeNull();
   });
 
-  it('rejects duplicate pending and verified emails and profile names generically', async () => {
+  it('allows the same active pending email to replace details and code', async () => {
     const first = accountValues('duplicate');
     const sent: SentCode[] = [];
     const bindings = mailBindings(sent);
@@ -118,17 +118,55 @@ describe('verified registration policy and delivery', () => {
     }, bindings);
     expect(start.status).toBe(202);
     const challenge = await start.json() as { challengeId: string };
+    const updatedName = 'Updated' + first.name.slice(-8);
 
-    const duplicatePending = accountValues('pending');
-    const duplicatePendingResponse = await request('/api/auth/register/start', {
+    const updatedStart = await request('/api/auth/register/start', {
       email: first.email.toUpperCase(),
-      password: 'correct-password',
-      name: duplicatePending.name,
+      password: 'updated-password',
+      name: updatedName,
     }, bindings);
-    expect(duplicatePendingResponse.status).toBe(409);
-    await expect(duplicatePendingResponse.json()).resolves.toMatchObject({
-      errorMessage: 'The email or game name is already in use.',
-    });
+    expect(updatedStart.status).toBe(202);
+    const updatedChallenge = await updatedStart.json() as { challengeId: string };
+    expect(updatedChallenge.challengeId).toBe(challenge.challengeId);
+    expect(sent).toHaveLength(2);
+
+    const pending = await env.DB.prepare(
+      'SELECT email, password_hash, salt, profile_name FROM pending_registrations WHERE id = ?',
+    ).bind(challenge.challengeId).first<{
+      email: string;
+      password_hash: string;
+      profile_name: string;
+      salt: string;
+    }>();
+    expect(pending).toMatchObject({ email: first.email, profile_name: updatedName });
+    expect(await verifyPassword('updated-password', pending?.salt ?? '', pending?.password_hash ?? '')).toBe(true);
+    expect(await verifyPassword('correct-password', pending?.salt ?? '', pending?.password_hash ?? '')).toBe(false);
+
+    const oldCode = await request('/api/auth/register/verify', {
+      challengeId: challenge.challengeId,
+      code: sent[0]?.code,
+    }, bindings);
+    expect(oldCode.status).toBe(400);
+
+    const verify = await request('/api/auth/register/verify', {
+      challengeId: updatedChallenge.challengeId,
+      code: sent[1]?.code,
+    }, bindings);
+    expect(verify.status).toBe(201);
+    await expect(verify.json()).resolves.toMatchObject({ user: { email: first.email, profile: { name: updatedName } } });
+  });
+
+  it('rejects duplicate verified emails and profile names generically', async () => {
+    const first = accountValues('duplicate');
+    const sent: SentCode[] = [];
+    const bindings = mailBindings(sent);
+    const start = await request('/api/auth/register/start', {
+      email: first.email,
+      password: 'correct-password',
+      name: first.name,
+    }, bindings);
+    expect(start.status).toBe(202);
+    const challenge = await start.json() as { challengeId: string };
 
     const verify = await request('/api/auth/register/verify', {
       challengeId: challenge.challengeId,
@@ -313,10 +351,31 @@ describe('invite consumption and account bootstrap', () => {
     await expect(env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(second.email).first()).resolves.toBeNull();
   });
 
-  it('assigns the configured bootstrap email the administrator role', async () => {
+  it('does not promote the first account when the configured bootstrap email does not match', async () => {
+    const account = accountValues('bootstrap-mismatch');
+    const sent: SentCode[] = [];
+    const bindings = mailBindings(sent, { BOOTSTRAP_ADMIN_EMAIL: 'admin@example.com' });
+    const start = await request('/api/auth/register/start', {
+      email: account.email,
+      password: 'correct-password',
+      name: account.name,
+    }, bindings);
+    const body = await start.json() as { challengeId: string };
+    const verify = await request('/api/auth/register/verify', {
+      challengeId: body.challengeId,
+      code: sent[0]?.code,
+    }, bindings);
+    expect(verify.status).toBe(201);
+    const response = await verify.json() as { user: { id: string; role: string } };
+    expect(response.user.role).toBe('user');
+    await expect(env.DB.prepare('SELECT role FROM users WHERE id = ?').bind(response.user.id).first())
+      .resolves.toEqual({ role: 'user' });
+  });
+
+  it('assigns the explicitly configured matching bootstrap email the administrator role', async () => {
     const account = accountValues('bootstrap');
     const sent: SentCode[] = [];
-    const bindings = mailBindings(sent, { BOOTSTRAP_ADMIN_EMAIL: account.email });
+    const bindings = mailBindings(sent, { BOOTSTRAP_ADMIN_EMAIL: `  ${account.email.toUpperCase()}  ` });
     const start = await request('/api/auth/register/start', {
       email: account.email,
       password: 'correct-password',

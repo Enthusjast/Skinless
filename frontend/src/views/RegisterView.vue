@@ -102,6 +102,7 @@ async function submitDetails() {
       form.inviteCode,
     );
     challengeId.value = response.challengeId;
+    code.value = '';
     expiresAt.value = response.expiresAt;
     resendAt.value = response.resendAfter;
     step.value = 'verify';

@@ -87,6 +87,33 @@ describe('RegisterView verified two-step flow', () => {
     expect(push).toHaveBeenCalledWith({ path: '/login', query: { registered: '1' } });
   });
 
+  it('resubmits changed details after returning from the code step', async () => {
+    const wrapper = mountRegister();
+    await fillDetails(wrapper);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    await wrapper.get('#verification-code').setValue('123456');
+    const editButton = wrapper
+      .findAll('button.text-button')
+      .find((button) => button.text().includes('返回修改资料'));
+    await editButton?.trigger('click');
+    await wrapper.get('#name').setValue('UpdatedPlayer');
+    await wrapper.get('#password').setValue('updated-password');
+    await wrapper.get('#confirm-password').setValue('updated-password');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+
+    expect(registerStart).toHaveBeenCalledTimes(2);
+    expect(registerStart).toHaveBeenLastCalledWith(
+      'player@example.com',
+      'updated-password',
+      'UpdatedPlayer',
+      '',
+    );
+    expect((wrapper.get('#verification-code').element as HTMLInputElement).value).toBe('');
+  });
+
   it('shows exact field errors and loading state for start failures', async () => {
     let resolveStart!: () => void;
     registerStart.mockImplementationOnce(

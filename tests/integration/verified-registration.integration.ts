@@ -99,15 +99,15 @@ describe("verified registration on real D1", () => {
     };
     expect(verifyBody.user).toMatchObject({
       email,
-      role: "admin",
+      role: "user",
       profile: { name },
     });
     const user = await env.DB.prepare(
-      "SELECT id, email_verified_at, status FROM users WHERE id = ?",
+      "SELECT id, email_verified_at, status, role FROM users WHERE id = ?",
     )
       .bind(verifyBody.user.id)
-      .first<{ id: string; email_verified_at: number; status: string }>();
-    expect(user).toMatchObject({ id: verifyBody.user.id, status: "active" });
+      .first<{ id: string; email_verified_at: number; role: string; status: string }>();
+    expect(user).toMatchObject({ id: verifyBody.user.id, role: "user", status: "active" });
     expect(user?.email_verified_at).toEqual(expect.any(Number));
     await expect(
       env.DB.prepare("SELECT id FROM pending_registrations WHERE id = ?")

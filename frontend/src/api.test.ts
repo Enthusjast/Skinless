@@ -347,6 +347,34 @@ describe('API error parsing', () => {
     });
   });
 
+  it('sends repeated registration details through the start endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ challengeId: 'challenge-1', expiresAt: 1, resendAfter: 2 }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(
+      register('player@example.com', 'updated-password', 'UpdatedPlayer'),
+    ).resolves.toEqual({
+      challengeId: 'challenge-1',
+      expiresAt: 1,
+      resendAfter: 2,
+    });
+
+    const [path, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    expect(path).toBe('/api/auth/register/start');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      email: 'player@example.com',
+      password: 'updated-password',
+      name: 'UpdatedPlayer',
+    });
+  });
+
   it('keeps the status fallback for non-JSON errors', async () => {
     vi.stubGlobal(
       'fetch',
