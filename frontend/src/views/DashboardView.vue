@@ -18,6 +18,17 @@ const passwordBusy = ref(false);
 const profile = computed(() => auth.profile);
 const selectedModel = ref<'classic' | 'slim'>(auth.profile?.skinModel ?? 'classic');
 const copied = ref(false);
+const temporarySkinPreview = ref<string | null>(null);
+const temporaryCapePreview = ref<string | null>(null);
+
+function setAssetPreview(asset: 'skin' | 'cape', url: string | null) {
+  if (asset === 'skin') temporarySkinPreview.value = url;
+  else temporaryCapePreview.value = url;
+}
+
+function clearAssetPreview(asset: 'skin' | 'cape') {
+  setAssetPreview(asset, null);
+}
 
 async function copyProfileId() {
   if (!profile.value?.id) return;
@@ -93,12 +104,16 @@ async function changePassword() {
         asset="skin"
         :current-hash="profile.skinHash"
         :model="selectedModel"
+        @preview="setAssetPreview('skin', $event)"
+        @updated="clearAssetPreview('skin')"
       />
       <SkinUploader
         v-if="profile"
         asset="cape"
         :current-hash="profile.capeHash"
         :model="selectedModel"
+        @preview="setAssetPreview('cape', $event)"
+        @updated="clearAssetPreview('cape')"
       />
       <UiCard as="section" id="security" class="panel password-panel">
         <div class="workspace-section-heading">
@@ -141,7 +156,14 @@ async function changePassword() {
       </UiCard>
     </div>
     <aside class="dashboard-side">
-      <SkinPreview v-if="profile" :skin-hash="profile.skinHash" :model="selectedModel" />
+      <SkinPreview
+        v-if="profile"
+        :skin-hash="profile.skinHash"
+        :cape-hash="profile.capeHash"
+        :skin-preview-url="temporarySkinPreview"
+        :cape-preview-url="temporaryCapePreview"
+        :model="selectedModel"
+      />
     </aside>
   </div>
 </template>

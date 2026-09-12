@@ -4,7 +4,11 @@ import { Check, FileImage, UploadCloud, X } from 'lucide-vue-next';
 import { formatApiError } from '../api';
 import UiCard from './common/UiCard.vue';
 import { useAuthStore } from '../stores/auth';
-import { TEXTURE_DIMENSION_INSTRUCTIONS, validateTextureFile } from '../utils/textureValidation';
+import {
+  normalizeTextureFile,
+  TEXTURE_CORRUPT_INSTRUCTION,
+  TEXTURE_DIMENSION_INSTRUCTIONS,
+} from '../utils/textureValidation';
 
 const props = defineProps<{
   asset: 'skin' | 'cape';
@@ -12,7 +16,10 @@ const props = defineProps<{
   model: 'classic' | 'slim';
 }>();
 
-const emit = defineEmits<{ updated: [hash: string | null] }>();
+const emit = defineEmits<{
+  updated: [hash: string | null];
+  preview: [url: string | null];
+}>();
 const auth = useAuthStore();
 const fileInput = ref<HTMLInputElement | null>(null);
 const selectedFile = ref<File | null>(null);
@@ -42,23 +49,35 @@ async function setFile(file: File | undefined) {
   const request = ++validationRequest;
   releasePreview();
   selectedFile.value = null;
+  emit('preview', null);
   error.value = '';
   success.value = '';
-  const validation = await validateTextureFile(file, props.asset);
+  let normalization;
+  try {
+    normalization = await normalizeTextureFile(file, props.asset);
+  } catch {
+    normalization = {
+      ok: false as const,
+      code: 'corrupt_png' as const,
+      message: TEXTURE_CORRUPT_INSTRUCTION,
+    };
+  }
   if (request !== validationRequest) return;
-  if (!validation.ok) {
-    error.value = validation.message;
+  if (!normalization.ok) {
+    error.value = normalization.message;
     if (fileInput.value) fileInput.value.value = '';
     return;
   }
-  selectedFile.value = file;
-  previewUrl.value = URL.createObjectURL(file);
+  selectedFile.value = normalization.file;
+  previewUrl.value = URL.createObjectURL(normalization.file);
+  emit('preview', previewUrl.value);
 }
 
 function clearSelection() {
   validationRequest += 1;
   selectedFile.value = null;
   releasePreview();
+  emit('preview', null);
   if (fileInput.value) fileInput.value.value = '';
 }
 

@@ -1366,6 +1366,22 @@ h3 {
   background-color: var(--surface-raised);
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
 }
+.texture-layer {
+  image-rendering: pixelated;
+}
+.cape-preview {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.cape-texture {
+  image-rendering: pixelated;
+  background: var(--surface-raised);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+}
 .preview-empty {
   min-height: 410px;
   display: grid;
