@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref } from 'vue';
 import { Check, FileImage, UploadCloud, X } from 'lucide-vue-next';
-import { ApiError } from '../api';
+import { formatApiError } from '../api';
 import UiCard from './common/UiCard.vue';
 import { useAuthStore } from '../stores/auth';
 
@@ -106,10 +106,7 @@ async function upload() {
     clearSelection();
     success.value = '已上传并保存。';
   } catch (cause) {
-    error.value =
-      cause instanceof ApiError || cause instanceof Error
-        ? cause.message
-        : '上传失败，请稍后重试。';
+    error.value = formatApiError(cause, '上传失败，请稍后重试。');
   } finally {
     busy.value = false;
   }
@@ -124,7 +121,7 @@ async function remove() {
     emit('updated', null);
     success.value = '已移除。';
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '移除失败，请稍后重试。';
+    error.value = formatApiError(cause, '移除失败，请稍后重试。');
   } finally {
     busy.value = false;
   }

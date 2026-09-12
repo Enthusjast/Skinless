@@ -2,8 +2,9 @@
 import { Copy, KeyRound, ShieldCheck } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ApiError } from '../api';
+import { formatApiError } from '../api';
 import UiCard from '../components/common/UiCard.vue';
+import SessionManagement from '../components/SessionManagement.vue';
 import SkinPreview from '../components/SkinPreview.vue';
 import SkinUploader from '../components/SkinUploader.vue';
 import { useAuthStore } from '../stores/auth';
@@ -36,8 +37,7 @@ async function changePassword() {
     passwordForm.value = { current: '', next: '' };
     await router.push({ path: '/login', query: { changed: '1' } });
   } catch (cause) {
-    passwordError.value =
-      cause instanceof ApiError || cause instanceof Error ? cause.message : '修改失败。';
+    passwordError.value = formatApiError(cause, '修改失败。');
   } finally {
     passwordBusy.value = false;
   }
@@ -137,6 +137,7 @@ async function changePassword() {
         </form>
         <p v-if="passwordMessage" class="form-success" role="status">{{ passwordMessage }}</p>
         <p v-if="passwordError" class="form-error" role="alert">{{ passwordError }}</p>
+        <SessionManagement />
       </UiCard>
     </div>
     <aside class="dashboard-side">

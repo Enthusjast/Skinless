@@ -2,7 +2,7 @@
 import { reactive, ref } from 'vue';
 import { Check, Eye, EyeOff, UserPlus } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
-import { ApiError } from '../api';
+import { formatApiError } from '../api';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
@@ -27,10 +27,7 @@ async function submit() {
     success.value = '账号创建成功，正在前往登录…';
     await router.push({ path: '/login', query: { registered: '1' } });
   } catch (cause) {
-    error.value =
-      cause instanceof ApiError || cause instanceof Error
-        ? cause.message
-        : '注册失败，请稍后重试。';
+    error.value = formatApiError(cause, '注册失败，请稍后重试。');
   } finally {
     busy.value = false;
   }

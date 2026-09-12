@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { RefreshCw, Search, ShieldCheck, Users } from 'lucide-vue-next';
-import { ApiError, getAdminUsers, updateUserRole, type AdminUser } from '../api';
+import { formatApiError, getAdminUsers, updateUserRole, type AdminUser } from '../api';
 import UiCard from '../components/common/UiCard.vue';
 import { useAuthStore } from '../stores/auth';
 
@@ -26,32 +26,30 @@ const filteredUsers = computed(() =>
 const adminCount = computed(() => users.value.filter((user) => user.role === 'admin').length);
 
 async function loadUsers() {
-  if (!auth.token) return;
+  if (!auth.isAuthenticated) return;
   loading.value = true;
   error.value = '';
   try {
-    users.value = (await getAdminUsers(auth.token)).users;
+    users.value = (await getAdminUsers()).users;
   } catch (cause) {
-    error.value =
-      cause instanceof ApiError || cause instanceof Error ? cause.message : '无法加载用户。';
+    error.value = formatApiError(cause, '无法加载用户。');
   } finally {
     loading.value = false;
   }
 }
 
 async function changeRole(user: AdminUser, event: Event) {
-  if (!auth.token) return;
+  if (!auth.isAuthenticated) return;
   const role = (event.target as HTMLSelectElement).value as 'user' | 'admin';
   updating.value = user.id;
   actionMessage.value = '';
   actionError.value = '';
   try {
-    await updateUserRole(auth.token, user.id, role);
+    await updateUserRole(user.id, role);
     user.role = role;
     actionMessage.value = `${user.profile.name} 的角色已更新。`;
   } catch (cause) {
-    actionError.value =
-      cause instanceof ApiError || cause instanceof Error ? cause.message : '角色更新失败。';
+    actionError.value = formatApiError(cause, '角色更新失败。');
     await loadUsers();
   } finally {
     updating.value = null;

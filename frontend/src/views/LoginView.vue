@@ -2,7 +2,7 @@
 import { reactive, ref } from 'vue';
 import { Eye, EyeOff, LockKeyhole, ShieldCheck, Sparkles } from 'lucide-vue-next';
 import { useRoute, useRouter } from 'vue-router';
-import { ApiError } from '../api';
+import { formatApiError } from '../api';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
@@ -29,10 +29,7 @@ async function submit() {
       candidate.startsWith('/') && !candidate.startsWith('//') ? candidate : '/dashboard';
     await router.push(redirect);
   } catch (cause) {
-    error.value =
-      cause instanceof ApiError || cause instanceof Error
-        ? cause.message
-        : '登录失败，请稍后重试。';
+    error.value = formatApiError(cause, '登录失败，请稍后重试。');
   }
 }
 </script>
@@ -44,7 +41,7 @@ async function submit() {
       <h1>登录 Minecraft 身份</h1>
       <p>使用账号登录外置认证服务，管理当前角色和纹理。</p>
       <div class="auth-perks">
-        <span><ShieldCheck :size="18" aria-hidden="true" />安全的 Bearer token</span
+        <span><ShieldCheck :size="18" aria-hidden="true" />安全的 Cookie 会话</span
         ><span><Sparkles :size="18" aria-hidden="true" />全球边缘低延迟</span>
       </div>
       <div class="auth-visual" aria-hidden="true"><span v-for="index in 24" :key="index" /></div>
