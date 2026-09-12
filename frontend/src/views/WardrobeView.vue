@@ -155,14 +155,8 @@ async function removeTexture(texture: WardrobeTexture) {
     await deleteWardrobeTexture(texture.id);
     const nextTotal = Math.max(0, total.value - 1);
     const nextOffset = nextTotal > 0 ? Math.floor((nextTotal - 1) / PAGE_SIZE) * PAGE_SIZE : 0;
-    total.value = nextTotal;
-    quota.value = { ...quota.value, used: Math.max(0, quota.value.used - 1) };
-    if (offset.value > nextOffset) {
-      offset.value = nextOffset;
-      await loadWardrobe();
-    } else {
-      textures.value = textures.value.filter((candidate) => candidate.id !== texture.id);
-    }
+    offset.value = Math.min(offset.value, nextOffset);
+    await loadWardrobe();
   } catch (cause) {
     error.value = formatApiError(cause, '删除纹理失败。');
   } finally {

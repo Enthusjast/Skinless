@@ -183,6 +183,51 @@ describe('WardrobeView', () => {
     expect(wrapper.text()).toContain('第 1 / 2 页');
   });
 
+  it('refreshes the current page after deleting from the middle of a three-page collection', async () => {
+    const firstPage = page([texture], 45, 0, true);
+    const pageTwoTexture = { ...texture, id: 'texture-21', name: 'Page two skin' };
+    const pageTwo = page([pageTwoTexture], 45, 20, true);
+    const refreshedPageTwoTexture = { ...texture, id: 'texture-41', name: 'Shifted skin' };
+    const refreshedPageTwo = page([refreshedPageTwoTexture], 44, 20, true);
+    const pageThreeTexture = { ...texture, id: 'texture-45', name: 'Page three skin' };
+    const pageThree = page([pageThreeTexture], 44, 40, false);
+    getWardrobe.mockReset();
+    getWardrobe
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(pageTwo)
+      .mockResolvedValueOnce(refreshedPageTwo)
+      .mockResolvedValueOnce(pageThree)
+      .mockResolvedValueOnce(refreshedPageTwo);
+
+    const wrapper = mount(WardrobeView);
+    await flushPromises();
+    await wrapper.get('button[data-action="next-page"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('第 2 / 3 页');
+
+    await wrapper.get('button[data-action="delete-texture"]').trigger('click');
+    await flushPromises();
+
+    expect(deleteWardrobeTexture).toHaveBeenCalledWith('texture-21');
+    expect(getWardrobe).toHaveBeenNthCalledWith(3, { type: undefined, limit: 20, offset: 20 });
+    expect(wrapper.get('[data-texture-id="texture-41"]')).toBeTruthy();
+    expect(wrapper.find('[data-texture-id="texture-21"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('44 / 50');
+    expect(wrapper.text()).toContain('第 2 / 3 页');
+
+    await wrapper.get('button[data-action="next-page"]').trigger('click');
+    await flushPromises();
+    expect(getWardrobe).toHaveBeenLastCalledWith({ type: undefined, limit: 20, offset: 40 });
+    expect(wrapper.get('[data-texture-id="texture-45"]')).toBeTruthy();
+    expect(wrapper.text()).toContain('第 3 / 3 页');
+
+    await wrapper.get('button[data-action="previous-page"]').trigger('click');
+    await flushPromises();
+    expect(getWardrobe).toHaveBeenLastCalledWith({ type: undefined, limit: 20, offset: 20 });
+    expect(wrapper.get('[data-texture-id="texture-41"]')).toBeTruthy();
+    expect(wrapper.text()).toContain('第 2 / 3 页');
+  });
+
   it('reloads the previous valid page after deleting its only later-page item', async () => {
     const firstPage = page([texture], 21, 0, true);
     const laterTexture = { ...texture, id: 'texture-21', name: 'Later skin' };
