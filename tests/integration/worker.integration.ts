@@ -11,9 +11,17 @@ import worker from '../../src/index';
 const EMAIL = 'runtime@example.com';
 const PASSWORD = 'correct-password';
 const PROFILE_NAME = 'RuntimePlayer';
-const SKIN_HASH = 'd65260560d5624335d8eef1c12568a08661f665baaa75140c134d40b71600660';
+const SKIN_HASH = '8d447892b6efbc450beab391a7003090694cfcd0014d20766150112cab1675a0';
 const SKIN_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAJ0lEQVR4nO3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAAIDODUBAAAENBzWNAAAAAElFTkSuQmCC';
+const CANONICAL_SKIN_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAJ0lEQVR4nO3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAAIB3A0BAAAGP8slRAAAAAElFTkSuQmCC';
+const PATTERNED_LEGACY_SKIN_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAYAAACinX6EAAAAh0lEQVR42u3TPRJDYBSF4e8TNKIUm0Ap2X+FEpsIpWj8XTOWYJjJzH1PcRfwnHOtUR57HOchsq1WLYD6BQAAAAAAAAAAAAAAAAAAAACgESB4hjL+htMYrufLMk+3YUavWPrua29dQFFW5vPO/7apumlNlia8AAAAAAAAAAAAAAAAAAAAwBXZAZXrFiFMyE+QAAAAAElFTkSuQmCC';
+const CONVERTED_LEGACY_SKIN_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAY0lEQVR4nO3avRlAQBAE0PObIET/3SBEPxSx353Aew3sxDObEilVdfN8nQEAAAAoaxinUB/Qdn3WPmFe1vx9xbYf2W9EnNf9dQQAAAAAAAAA/i36X1Bk/88t+l9g/wcAACjoBVMXEITIUfc3AAAAAElFTkSuQmCC';
+const WRONG_DIMENSIONS_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAAVklEQVR4nO3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBvAI8AAT4ZY7sAAAAASUVORK5CYII=';
 
 interface ProfileResponse {
   id: string;
@@ -40,6 +48,70 @@ function jsonRequest(path: string, body: unknown): Promise<Response> {
 
 function decodeBase64(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+function pngFile(bytes: Uint8Array, type = 'image/png'): File {
+  return new File([bytes.buffer as ArrayBuffer], 'texture.png', { type });
+}
+
+function fakePngHeader(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(33);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  bytes.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return bytes;
+}
+
+function pngDimensions(bytes: Uint8Array): { width: number; height: number } {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { width: view.getUint32(16), height: view.getUint32(20) };
+}
+
+async function transparentPng(width: number, height: number): Promise<Uint8Array> {
+  const raw = new Uint8Array((width * 4 + 1) * height);
+  const stream = new CompressionStream('deflate');
+  const writer = stream.writable.getWriter();
+  const compressed = new Response(stream.readable).arrayBuffer();
+  await writer.write(raw);
+  await writer.close();
+
+  const idat = new Uint8Array(await compressed);
+  const ihdr = new Uint8Array(13);
+  const ihdrView = new DataView(ihdr.buffer);
+  ihdrView.setUint32(0, width);
+  ihdrView.setUint32(4, height);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const chunk = (type: string, data: Uint8Array): Uint8Array => {
+    const typeBytes = Uint8Array.from(type, (character) => character.charCodeAt(0));
+    const bytes = new Uint8Array(data.byteLength + 12);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, data.byteLength);
+    bytes.set(typeBytes, 4);
+    bytes.set(data, 8);
+    let crc = 0xffffffff;
+    for (const value of [...typeBytes, ...data]) {
+      crc ^= value;
+      for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    }
+    view.setUint32(data.byteLength + 8, (crc ^ 0xffffffff) >>> 0);
+    return bytes;
+  };
+  const parts = [
+    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', idat),
+    chunk('IEND', new Uint8Array()),
+  ];
+  const result = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
 }
 
 function cookieValue(setCookie: string, name: string): string {
@@ -181,6 +253,7 @@ describe('Cloudflare runtime integration', () => {
     });
 
     const skinBytes = decodeBase64(SKIN_PNG_BASE64);
+    const canonicalSkinBytes = decodeBase64(CANONICAL_SKIN_PNG_BASE64);
     const skinForm = new FormData();
     skinForm.set('file', new File([skinBytes.buffer as ArrayBuffer], 'skin.png', { type: 'image/png' }));
     skinForm.set('skin_model', 'slim');
@@ -208,12 +281,12 @@ describe('Cloudflare runtime integration', () => {
     expect(await env.BUCKET.head(skinKey)).not.toBeNull();
     const storedSkin = await env.BUCKET.get(skinKey);
     expect(storedSkin).not.toBeNull();
-    expect(new Uint8Array(await storedSkin!.arrayBuffer())).toEqual(skinBytes);
+    expect(new Uint8Array(await storedSkin!.arrayBuffer())).toEqual(canonicalSkinBytes);
 
     const textureResponse = await SELF.fetch(`https://worker.test/textures/${SKIN_HASH}`);
     expect(textureResponse.status).toBe(200);
     expect(textureResponse.headers.get('content-type')).toBe('image/png');
-    expect(new Uint8Array(await textureResponse.arrayBuffer())).toEqual(skinBytes);
+    expect(new Uint8Array(await textureResponse.arrayBuffer())).toEqual(canonicalSkinBytes);
 
     const joinResponse = await jsonRequest('/sessionserver/session/minecraft/join', {
       accessToken: authenticateBody.accessToken,
@@ -254,6 +327,92 @@ describe('Cloudflare runtime integration', () => {
         },
       },
     });
+  });
+
+  it('rejects invalid texture inputs, converts legacy skins, and preserves cape resolutions', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 8);
+    const email = `texture-${suffix}@example.com`;
+    const name = `Texture${suffix}`;
+    const registerResponse = await jsonRequest('/api/register', {
+      email,
+      password: PASSWORD,
+      name,
+    });
+    expect(registerResponse.status).toBe(201);
+
+    const authenticateResponse = await jsonRequest('/authserver/authenticate', {
+      username: email,
+      password: PASSWORD,
+      clientToken: `texture-client-${suffix}`,
+    });
+    expect(authenticateResponse.status).toBe(200);
+    const authenticateBody = await authenticateResponse.json() as { accessToken: string };
+    const authorization = { Authorization: `Bearer ${authenticateBody.accessToken}` };
+
+    const rejectedInputs: Array<{ bytes: Uint8Array; type: string; code: string }> = [
+      { bytes: decodeBase64(SKIN_PNG_BASE64), type: 'image/jpeg', code: 'unsupported_format' },
+      { bytes: decodeBase64(SKIN_PNG_BASE64), type: 'image/webp', code: 'unsupported_format' },
+      { bytes: decodeBase64(WRONG_DIMENSIONS_BASE64), type: 'image/png', code: 'invalid_dimensions' },
+      { bytes: fakePngHeader(64, 64), type: 'image/png', code: 'corrupt_png' },
+      { bytes: decodeBase64(SKIN_PNG_BASE64).slice(0, -8), type: 'image/png', code: 'corrupt_png' },
+    ];
+    for (const input of rejectedInputs) {
+      const form = new FormData();
+      form.set('file', pngFile(input.bytes, input.type));
+      const response = await SELF.fetch('https://worker.test/api/user/skin', {
+        method: 'POST',
+        headers: authorization,
+        body: form,
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ errorCode: input.code });
+    }
+
+    const legacyBytes = decodeBase64(PATTERNED_LEGACY_SKIN_BASE64);
+    const legacyForm = new FormData();
+    legacyForm.set('file', pngFile(legacyBytes));
+    legacyForm.set('sha256', '8393c45e10ac66cc5e5236500ce5cfed9c987faa098a69f881408d91f19fde99');
+    const legacyResponse = await SELF.fetch('https://worker.test/api/user/skin', {
+      method: 'POST',
+      headers: authorization,
+      body: legacyForm,
+    });
+    expect(legacyResponse.status).toBe(201);
+    const legacyBody = await legacyResponse.json() as { hash: string; dimensions: { width: number; height: number } };
+    expect(legacyBody).toMatchObject({
+      hash: '8393c45e10ac66cc5e5236500ce5cfed9c987faa098a69f881408d91f19fde99',
+      dimensions: { width: 64, height: 64 },
+    });
+    const storedLegacy = await env.BUCKET.get(`${legacyBody.hash}.png`);
+    expect(new Uint8Array(await storedLegacy!.arrayBuffer())).toEqual(decodeBase64(CONVERTED_LEGACY_SKIN_BASE64));
+
+    const cape64 = await transparentPng(64, 32);
+    const cape64Form = new FormData();
+    cape64Form.set('file', pngFile(cape64));
+    const cape64Response = await SELF.fetch('https://worker.test/api/user/cape', {
+      method: 'POST',
+      headers: authorization,
+      body: cape64Form,
+    });
+    expect(cape64Response.status).toBe(201);
+    const cape64Body = await cape64Response.json() as { hash: string; dimensions: { width: number; height: number } };
+    expect(cape64Body.dimensions).toEqual({ ok: true, width: 64, height: 32 });
+    const storedCape64 = await env.BUCKET.get(`${cape64Body.hash}.png`);
+    expect(pngDimensions(new Uint8Array(await storedCape64!.arrayBuffer()))).toEqual({ width: 64, height: 32 });
+
+    const capeLarge = await transparentPng(1024, 512);
+    const capeLargeForm = new FormData();
+    capeLargeForm.set('file', pngFile(capeLarge));
+    const capeLargeResponse = await SELF.fetch('https://worker.test/api/user/cape', {
+      method: 'POST',
+      headers: authorization,
+      body: capeLargeForm,
+    });
+    expect(capeLargeResponse.status).toBe(201);
+    const capeLargeBody = await capeLargeResponse.json() as { hash: string; dimensions: { width: number; height: number } };
+    expect(capeLargeBody.dimensions).toEqual({ ok: true, width: 1024, height: 512 });
+    const storedCapeLarge = await env.BUCKET.get(`${capeLargeBody.hash}.png`);
+    expect(pngDimensions(new Uint8Array(await storedCapeLarge!.arrayBuffer()))).toEqual({ width: 1024, height: 512 });
   });
 
   it('deletes only expired tokens and server sessions when scheduled', async () => {

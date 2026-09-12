@@ -3,6 +3,36 @@ import { app } from '../src/index';
 import { clearLoginFailures } from '../src/middleware/ratelimit';
 import type { ProfileRecord, TokenRecord, UserRecord } from '../src/types';
 
+const nonCanonicalModernSkin = Uint8Array.from(atob(
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAa0lEQVR42u3QBwEAIAzAMMb1LxiGD0gdNBG1ZZ4d5dO+HQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK/Ux1wXYi0EV47N+ssAAAAASUVORK5CYII=',
+), (character) => character.charCodeAt(0));
+const patternedLegacySkin = Uint8Array.from(atob(
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAYAAACinX6EAAAAh0lEQVR42u3TPRJDYBSF4e8TNKIUm0Ap2X+FEpsIpWj8XTOWYJjJzH1PcRfwnHOtUR57HOchsq1WLYD6BQAAAAAAAAAAAAAAAAAAAACgESB4hjL+htMYrufLMk+3YUavWPrua29dQFFW5vPO/7apumlNlia8AAAAAAAAAAAAAAAAAAAAwBXZAZXrFiFMyE+QAAAAAElFTkSuQmCC',
+), (character) => character.charCodeAt(0));
+const convertedLegacySkin = Uint8Array.from(atob(
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAY0lEQVR4nO3avRlAQBAE0PObIET/3SBEPxSx353Aew3sxDObEilVdfN8nQEAAAAoaxinUB/Qdn3WPmFe1vx9xbYf2W9EnNf9dQQAAAAAAAAA/i36X1Bk/88t+l9g/wcAACjoBVMXEITIUfc3AAAAAElFTkSuQmCC',
+), (character) => character.charCodeAt(0));
+const legacySkin = Uint8Array.from(atob(
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAYAAACinX6EAAAAHklEQVR4nO3BAQ0AAADCoPdPbQ8HFAAAAAAAAADwbiAgAAFXlYP5AAAAAElFTkSuQmCC',
+), (character) => character.charCodeAt(0));
+const wrongDimensions = Uint8Array.from(atob(
+  'iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAAVklEQVR4nO3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOBvAI8AAT4ZY7sAAAAASUVORK5CYII=',
+), (character) => character.charCodeAt(0));
+
+function pngFile(bytes: Uint8Array, type = 'image/png'): File {
+  return new File([bytes.buffer as ArrayBuffer], 'texture.png', { type });
+}
+
+function fakePngHeader(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(33);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  bytes.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return bytes;
+}
+
 type Row = Record<string, unknown>;
 
 class Statement {
@@ -167,16 +197,6 @@ class MemoryBucket {
   }
 }
 
-function pngHeader(width: number, height: number): Uint8Array {
-  const bytes = new Uint8Array(33);
-  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  bytes.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
-  const view = new DataView(bytes.buffer);
-  view.setUint32(16, width);
-  view.setUint32(20, height);
-  return bytes;
-}
-
 async function registeredClient() {
   const db = new MemoryD1();
   const bucket = new MemoryBucket();
@@ -194,14 +214,14 @@ describe('management API', () => {
   it('registers a user, uploads a skin, and removes its unreferenced R2 object', async () => {
     const { db, bucket, env, token } = await registeredClient();
     const mismatchForm = new FormData();
-    mismatchForm.set('file', new File([pngHeader(64, 64).buffer as ArrayBuffer], 'skin.png', { type: 'image/png' }));
+    mismatchForm.set('file', pngFile(nonCanonicalModernSkin));
     mismatchForm.set('sha256', '0'.repeat(64));
     const mismatch = await app.request('/api/user/skin', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: mismatchForm }, env);
     expect(mismatch.status).toBe(400);
     expect(bucket.files.size).toBe(0);
 
     const form = new FormData();
-    form.set('file', new File([pngHeader(64, 64).buffer as ArrayBuffer], 'skin.png', { type: 'image/png' }));
+    form.set('file', pngFile(nonCanonicalModernSkin));
     form.set('skin_model', 'slim');
     const upload = await app.request('/api/user/skin', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form }, env);
 
@@ -222,6 +242,70 @@ describe('management API', () => {
     const remove = await app.request('/api/user/skin', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }, env);
     expect(remove.status).toBe(204);
     expect(bucket.files.size).toBe(0);
+  });
+
+  it('rejects unsupported formats, invalid dimensions, fake headers, and truncated PNGs with stable codes', async () => {
+    const { bucket, env, token } = await registeredClient();
+    const cases: Array<{ bytes: Uint8Array; type: string; expected: string }> = [
+      { bytes: nonCanonicalModernSkin, type: 'image/jpeg', expected: 'unsupported_format' },
+      { bytes: wrongDimensions, type: 'image/png', expected: 'invalid_dimensions' },
+      { bytes: new Uint8Array(33).fill(0), type: 'image/png', expected: 'unsupported_format' },
+      { bytes: fakePngHeader(64, 64), type: 'image/png', expected: 'corrupt_png' },
+      { bytes: nonCanonicalModernSkin.slice(0, -8), type: 'image/png', expected: 'corrupt_png' },
+    ];
+
+    for (const candidate of cases) {
+      const form = new FormData();
+      form.set('file', pngFile(candidate.bytes, candidate.type));
+      const response = await app.request('/api/user/skin', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      }, env);
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ errorCode: candidate.expected });
+    }
+    expect(bucket.files.size).toBe(0);
+  });
+
+  it('converts legacy skins before hashing and stores the canonical R2 bytes', async () => {
+    const { bucket, env, token } = await registeredClient();
+    const form = new FormData();
+    form.set('file', pngFile(patternedLegacySkin));
+    form.set('sha256', '8393c45e10ac66cc5e5236500ce5cfed9c987faa098a69f881408d91f19fde99');
+
+    const response = await app.request('/api/user/skin', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    }, env);
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      asset: 'skin',
+      hash: '8393c45e10ac66cc5e5236500ce5cfed9c987faa098a69f881408d91f19fde99',
+      dimensions: { ok: true, width: 64, height: 64 },
+    });
+    expect(bucket.files.get('8393c45e10ac66cc5e5236500ce5cfed9c987faa098a69f881408d91f19fde99.png'))
+      .toEqual(convertedLegacySkin);
+    expect(bucket.files.get('8393c45e10ac66cc5e5236500ce5cfed9c987faa098a69f881408d91f19fde99.png'))
+      .not.toEqual(patternedLegacySkin);
+  });
+
+  it('accepts a legacy skin when the optional client hash is omitted', async () => {
+    const { env, token } = await registeredClient();
+    const form = new FormData();
+    form.set('file', pngFile(legacySkin));
+    const response = await app.request('/api/user/skin', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    }, env);
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      dimensions: { ok: true, width: 64, height: 64 },
+    });
   });
 
   it('revokes existing tokens when the password changes', async () => {

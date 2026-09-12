@@ -4,6 +4,7 @@ import { Check, FileImage, UploadCloud, X } from 'lucide-vue-next';
 import { formatApiError } from '../api';
 import UiCard from './common/UiCard.vue';
 import { useAuthStore } from '../stores/auth';
+import { TEXTURE_DIMENSION_INSTRUCTIONS, validateTextureFile } from '../utils/textureValidation';
 
 const props = defineProps<{
   asset: 'skin' | 'cape';
@@ -20,6 +21,7 @@ const error = ref('');
 const success = ref('');
 const dragging = ref(false);
 const previewUrl = ref('');
+let validationRequest = 0;
 
 function chooseFile() {
   fileInput.value?.click();
@@ -32,19 +34,29 @@ function releasePreview() {
 
 function onFileChange(event: Event) {
   const input = event.target as HTMLInputElement;
-  setFile(input.files?.[0]);
+  void setFile(input.files?.[0]);
 }
 
-function setFile(file: File | undefined) {
+async function setFile(file: File | undefined) {
   if (!file) return;
+  const request = ++validationRequest;
   releasePreview();
-  selectedFile.value = file;
-  previewUrl.value = URL.createObjectURL(file);
+  selectedFile.value = null;
   error.value = '';
   success.value = '';
+  const validation = await validateTextureFile(file, props.asset);
+  if (request !== validationRequest) return;
+  if (!validation.ok) {
+    error.value = validation.message;
+    if (fileInput.value) fileInput.value.value = '';
+    return;
+  }
+  selectedFile.value = file;
+  previewUrl.value = URL.createObjectURL(file);
 }
 
 function clearSelection() {
+  validationRequest += 1;
   selectedFile.value = null;
   releasePreview();
   if (fileInput.value) fileInput.value.value = '';
@@ -52,45 +64,7 @@ function clearSelection() {
 
 function onDrop(event: DragEvent) {
   dragging.value = false;
-  setFile(event.dataTransfer?.files?.[0]);
-}
-
-function resizeTexture(file: File): Promise<Blob> {
-  const targetWidth = props.asset === 'skin' ? 64 : 64;
-  const targetHeight = props.asset === 'skin' ? 64 : 32;
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    const objectUrl = URL.createObjectURL(file);
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      const context = canvas.getContext('2d');
-      if (!context) {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error('浏览器不支持 Canvas。'));
-        return;
-      }
-      context.imageSmoothingEnabled = false;
-      context.clearRect(0, 0, targetWidth, targetHeight);
-      context.drawImage(image, 0, 0, targetWidth, targetHeight);
-      URL.revokeObjectURL(objectUrl);
-      canvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error('无法生成 PNG。'))),
-        'image/png',
-      );
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('无法读取图片文件。'));
-    };
-    image.src = objectUrl;
-  });
-}
-
-async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  void setFile(event.dataTransfer?.files?.[0]);
 }
 
 async function upload() {
@@ -99,9 +73,7 @@ async function upload() {
   error.value = '';
   success.value = '';
   try {
-    const normalized = await resizeTexture(selectedFile.value);
-    const clientHash = await sha256Hex(await normalized.arrayBuffer());
-    const result = await auth.upload(props.asset, normalized, props.model, clientHash);
+    const result = await auth.upload(props.asset, selectedFile.value, props.model);
     emit('updated', result.hash);
     clearSelection();
     success.value = '已上传并保存。';
@@ -143,16 +115,14 @@ onUnmounted(releasePreview);
     </div>
     <p class="upload-help">
       {{
-        asset === 'skin'
-          ? '支持任意图片，浏览器会处理为 64 × 64 PNG。'
-          : '支持任意图片，浏览器会处理为 64 × 32 PNG。'
+        asset === 'skin' ? TEXTURE_DIMENSION_INSTRUCTIONS.skin : TEXTURE_DIMENSION_INSTRUCTIONS.cape
       }}
     </p>
     <input
       ref="fileInput"
       class="visually-hidden"
       type="file"
-      accept="image/png,image/jpeg,image/webp"
+      accept="image/png"
       @change="onFileChange"
     />
     <button
@@ -174,9 +144,7 @@ onUnmounted(releasePreview);
       /></span>
       <span
         ><strong>{{ selectedFile ? selectedFile.name : '拖拽图片到这里' }}</strong
-        ><small>{{
-          selectedFile ? '已准备好，点击上传保存' : '或点击选择 PNG / JPG / WebP'
-        }}</small></span
+        ><small>{{ selectedFile ? '已准备好，点击上传保存' : '或点击选择 PNG' }}</small></span
       >
     </button>
     <div class="upload-actions">

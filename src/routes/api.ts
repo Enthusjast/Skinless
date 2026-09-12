@@ -31,7 +31,7 @@ import { createSalt, hashPassword, sha256Hex, timingSafeEqual, verifyPassword } 
 import { jsonError, readJson } from '../utils/errors';
 import { turnstileTokenFromBody, verifyTurnstileToken } from '../utils/turnstile';
 import { serializeProfile, serializeUser, serializeUserWithProfile } from '../utils/serializers';
-import { validatePng, type AssetKind } from '../utils/png';
+import { normalizePng, type AssetKind } from '../utils/png';
 import { generateProfileId, generateUserId } from '../utils/uuid';
 import {
   ACCESS_TOKEN_TTL_MS,
@@ -122,11 +122,20 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
 
   const file = assetFile(body, asset);
   if (!file) return jsonError(c, 400, `${asset} file is required.`);
-  if (file.type && file.type !== 'image/png') return jsonError(c, 400, 'Only PNG files are supported.');
+  if (file.type && file.type !== 'image/png') {
+    return jsonError(c, 400, 'Only PNG files are supported.', 'IllegalArgumentException', 'unsupported_format');
+  }
 
-  const bytes = await file.arrayBuffer();
-  const validation = validatePng(bytes, asset);
-  if (!validation.ok) return jsonError(c, 400, validation.reason);
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await file.arrayBuffer();
+  } catch {
+    return jsonError(c, 400, 'The uploaded PNG is corrupt or incomplete.', 'IllegalArgumentException', 'corrupt_png');
+  }
+  const normalized = await normalizePng(bytes, asset);
+  if (!normalized.ok) {
+    return jsonError(c, 400, normalized.reason, 'IllegalArgumentException', normalized.code);
+  }
 
   const profile = c.get('profile');
   const selectedModel = skinModel(body.skin_model);
@@ -135,7 +144,7 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   }
   const model = selectedModel ?? profile.skin_model;
 
-  const hash = await sha256Hex(bytes);
+  const hash = await sha256Hex(normalized.bytes);
   const clientHash = asString(body.sha256);
   if (clientHash && !/^[0-9a-f]{64}$/i.test(clientHash)) {
     return jsonError(c, 400, 'sha256 must be a 64-character hexadecimal digest.');
@@ -145,7 +154,7 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   }
   const key = `${hash}.png`;
   if (!await c.env.BUCKET.head(key)) {
-    await c.env.BUCKET.put(key, bytes, {
+    await c.env.BUCKET.put(key, normalized.bytes, {
       httpMetadata: {
         contentType: 'image/png',
         cacheControl: 'public, max-age=31536000, immutable',
@@ -160,7 +169,13 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   const nextProfile: ProfileRecord = asset === 'skin'
     ? { ...profile, skin_hash: hash, skin_model: model }
     : { ...profile, cape_hash: hash };
-  return c.json({ asset, hash, profile: serializeProfile(nextProfile), dimensions: validation }, 201);
+  return c.json({
+    asset,
+    hash,
+    profile: serializeProfile(nextProfile),
+    dimensions: { ok: true, width: normalized.width, height: normalized.height },
+    sourceDimensions: { width: normalized.sourceWidth, height: normalized.sourceHeight },
+  }, 201);
 }
 
 async function deleteAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Response> {

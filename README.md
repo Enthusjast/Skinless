@@ -110,7 +110,7 @@ HMCL/PCL2 等启动器选择“外置登录（Authlib Injector）”，认证服
 ## 安全与运行边界
 
 - 密码使用 Workers Web Crypto PBKDF2-SHA256（100,000 次迭代），数据库不保存明文密码。
-- Worker 校验 PNG 魔数、尺寸和 64 KB 大小限制；图片处理在浏览器 Canvas 中完成。
+- Worker 解码并校验 PNG 完整性、像素尺寸和大小限制，再将皮肤/披风编码为规范 PNG；浏览器在选择文件时只接受协议支持的 PNG 尺寸，不拉伸图片。
 - 管理接口使用 HttpOnly 同源 Cookie 会话和 CSRF token；Yggdrasil 协议接口继续使用 Bearer token，管理员接口额外要求 `role=admin`。
 - 登录失败限制当前按 Worker 实例内存计数，适合 v1 小规模部署；若需要跨实例的严格全局限制，应替换为 Durable Object 或 KV 方案。
 - v1 不生成 RSA textures signature；主流 Authlib Injector 和启动器可在无签名时工作。
