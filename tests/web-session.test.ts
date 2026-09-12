@@ -223,6 +223,34 @@ describe('secure web sessions', () => {
     expect(setCookie).toContain('skinless_csrf=');
   });
 
+  it('does not count malformed requests toward the five-attempt window', async () => {
+    const { env } = await createEnv();
+    const headers = { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.43' };
+    const malformedBodies = [
+      '{',
+      JSON.stringify({ email: user.email }),
+      JSON.stringify({ password: 'wrong-password' }),
+      JSON.stringify({ email: user.email, password: '' }),
+      JSON.stringify({ email: user.email, password: 'x'.repeat(257) }),
+    ];
+
+    for (const body of malformedBodies) {
+      const response = await app.request('/api/auth/login', {
+        method: 'POST',
+        headers,
+        body,
+      }, env);
+      expect(response.status).toBe(400);
+    }
+
+    const valid = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ email: user.email, password: 'correct-password' }),
+    }, env);
+    expect(valid.status).toBe(200);
+  });
+
   it('keeps unknown-user failures generic and requires Turnstile after three failures', async () => {
     const first = await createEnv();
     const knownFailure = await app.request('/api/auth/login', {

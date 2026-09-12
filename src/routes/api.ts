@@ -213,19 +213,20 @@ routes.post('/register', async (c) => {
 });
 
 routes.post('/auth/login', async (c) => {
-  const clientKey = getClientKey(c.req.raw);
-  const admission = await admitLoginAttempt(c.env, clientKey);
-  if (!admission.allowed) {
-    return jsonError(c, 429, 'Too many failed login attempts. Try again later.', 'TooManyRequests');
-  }
-
   const body = await readJson<WebLoginInput>(c);
   const email = asString(body?.email)?.toLowerCase();
   const password = asPassword(body?.password);
   if (!email || !password) return jsonError(c, 400, 'email and password are required.');
   if (password.length > 256) return jsonError(c, 400, 'Password must be 256 characters or fewer.');
 
-  if (admission.failedCount > LOGIN_TURNSTILE_THRESHOLD) {
+  const clientKey = getClientKey(c.req.raw);
+  const admission = await admitLoginAttempt(c.env, clientKey);
+  if (!admission.allowed) {
+    return jsonError(c, 429, 'Too many failed login attempts. Try again later.', 'TooManyRequests');
+  }
+
+  const priorFailures = Math.max(0, admission.failedCount - 1);
+  if (priorFailures >= LOGIN_TURNSTILE_THRESHOLD) {
     const turnstileValid = await verifyTurnstileToken(
       turnstileTokenFromBody(body),
       c.env.TURNSTILE_SECRET_KEY,
