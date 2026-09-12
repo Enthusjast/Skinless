@@ -172,8 +172,10 @@ describe('Cloudflare runtime integration', () => {
 
     const firstUserId = 'legacy-user-a';
     const secondUserId = 'legacy-user-b';
+    const thirdUserId = 'legacy-user-c';
     const firstProfileId = '11111111111111111111111111111111';
     const secondProfileId = '22222222222222222222222222222222';
+    const thirdProfileId = '33333333333333333333333333333333';
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO users (id, email, password, salt, role, created_at, updated_at)
@@ -184,6 +186,10 @@ describe('Cloudflare runtime integration', () => {
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).bind(secondUserId, 'legacy-b@example.com', 'hash-b', 'salt-b', 'user', 200, 201),
       env.DB.prepare(
+        `INSERT INTO users (id, email, password, salt, role, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(thirdUserId, 'legacy-c@example.com', 'hash-c', 'salt-c', 'user', 300, 301),
+      env.DB.prepare(
         `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model)
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).bind(firstProfileId, firstUserId, 'LegacyHero', 'skin-hash-a', 'cape-hash-a', 'classic'),
@@ -191,6 +197,10 @@ describe('Cloudflare runtime integration', () => {
         `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model)
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).bind(secondProfileId, secondUserId, 'legacyhero', 'skin-hash-b', null, 'slim'),
+      env.DB.prepare(
+        `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(thirdProfileId, thirdUserId, 'x000000000000002', 'skin-hash-c', 'cape-hash-c', 'classic'),
       env.DB.prepare(
         `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -200,6 +210,10 @@ describe('Cloudflare runtime integration', () => {
          VALUES (?, ?, ?, ?, ?, ?)`,
       ).bind('legacy-token-b', 'client-b', secondUserId, secondProfileId, 210, 2_000),
       env.DB.prepare(
+        `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind('legacy-token-c', 'client-c', thirdUserId, thirdProfileId, 310, 3_000),
+      env.DB.prepare(
         `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
          VALUES (?, ?, ?, ?, ?)`,
       ).bind('legacy-server-a', firstProfileId, firstUserId, 120, 1_000),
@@ -207,6 +221,10 @@ describe('Cloudflare runtime integration', () => {
         `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
          VALUES (?, ?, ?, ?, ?)`,
       ).bind('legacy-server-b', secondProfileId, secondUserId, 220, 2_000),
+      env.DB.prepare(
+        `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind('legacy-server-c', thirdProfileId, thirdUserId, 320, 3_000),
       env.DB.prepare(
         `INSERT INTO web_sessions (id, user_id, refresh_token_hash, csrf_token_hash, device_label, created_at, last_used_at, expires_at, revoked_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
@@ -233,14 +251,30 @@ describe('Cloudflare runtime integration', () => {
       {
         id: secondProfileId,
         user_id: secondUserId,
-        name: 'legacyh_22222222',
+        name: 'x000000000000002',
         skin_hash: 'skin-hash-b',
         cape_hash: null,
         skin_model: 'slim',
         created_at: 200,
         updated_at: 201,
       },
+      {
+        id: thirdProfileId,
+        user_id: thirdUserId,
+        name: 'x000000000000003',
+        skin_hash: 'skin-hash-c',
+        cape_hash: 'cape-hash-c',
+        skin_model: 'classic',
+        created_at: 300,
+        updated_at: 301,
+      },
     ]);
+
+    const duplicateNames = await env.DB.prepare(
+      `SELECT lower(name) AS normalized_name, COUNT(*) AS name_count
+       FROM profiles GROUP BY lower(name) HAVING COUNT(*) > 1`,
+    ).all<Record<string, unknown>>();
+    expect(duplicateNames.results).toEqual([]);
 
     const users = await env.DB.prepare(
       `SELECT id, email, password, salt, role, created_at, updated_at, default_profile_id
@@ -267,6 +301,16 @@ describe('Cloudflare runtime integration', () => {
         updated_at: 201,
         default_profile_id: secondProfileId,
       },
+      {
+        id: thirdUserId,
+        email: 'legacy-c@example.com',
+        password: 'hash-c',
+        salt: 'salt-c',
+        role: 'user',
+        created_at: 300,
+        updated_at: 301,
+        default_profile_id: thirdProfileId,
+      },
     ]);
 
     await expect(env.DB.prepare(
@@ -276,6 +320,7 @@ describe('Cloudflare runtime integration', () => {
       results: [
         { access_token: 'legacy-token-a', client_token: 'client-a', user_id: firstUserId, profile_id: firstProfileId, created_at: 110, expires_at: 1_000 },
         { access_token: 'legacy-token-b', client_token: 'client-b', user_id: secondUserId, profile_id: secondProfileId, created_at: 210, expires_at: 2_000 },
+        { access_token: 'legacy-token-c', client_token: 'client-c', user_id: thirdUserId, profile_id: thirdProfileId, created_at: 310, expires_at: 3_000 },
       ],
     });
     await expect(env.DB.prepare(
@@ -285,6 +330,7 @@ describe('Cloudflare runtime integration', () => {
       results: [
         { server_id: 'legacy-server-a', profile_id: firstProfileId, user_id: firstUserId, created_at: 120, expires_at: 1_000 },
         { server_id: 'legacy-server-b', profile_id: secondProfileId, user_id: secondUserId, created_at: 220, expires_at: 2_000 },
+        { server_id: 'legacy-server-c', profile_id: thirdProfileId, user_id: thirdUserId, created_at: 320, expires_at: 3_000 },
       ],
     });
     await expect(env.DB.prepare(
@@ -305,7 +351,7 @@ describe('Cloudflare runtime integration', () => {
     await expect(env.DB.prepare(
       `INSERT INTO profiles (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
        VALUES (?, ?, ?, NULL, NULL, 'classic', ?, ?)`,
-    ).bind('33333333333333333333333333333333', firstUserId, 'LEGACYHERO', 300, 300).run()).rejects.toThrow();
+    ).bind('44444444444444444444444444444444', firstUserId, 'LEGACYHERO', 400, 400).run()).rejects.toThrow();
   });
 
   it('manages profiles with real D1 and enforces names, quota, ownership, defaults, and deletion', async () => {

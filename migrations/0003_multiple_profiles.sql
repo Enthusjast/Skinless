@@ -7,10 +7,12 @@ DELETE FROM tokens;
 PRAGMA foreign_keys = OFF;
 
 -- Legacy 0001 compared names case-sensitively, so `Player` and `player` may
--- already coexist. For each case-folded name, keep the oldest row unchanged;
--- order ties by the profile UUID using binary comparison. Every later variant
--- is renamed to its first seven name characters, an underscore, and the final
--- eight hex characters of its unchanged UUID (maximum 16 valid name chars).
+-- already coexist. Number every legacy profile globally in deterministic order:
+-- ascending owning-user creation time (NULL as 0), then profile ID using
+-- binary text order. A generated name is the reserved valid Minecraft-name
+-- namespace `x` plus that row number as exactly 15 zero-padded digits. Keep the
+-- oldest non-conflicting case variant unchanged; rename later variants and any
+-- legacy name already in the reserved namespace to its generated name.
 
 CREATE TABLE profiles_new (
   id          TEXT PRIMARY KEY,
@@ -24,31 +26,46 @@ CREATE TABLE profiles_new (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+WITH ranked_profiles AS (
+  SELECT
+    p.id,
+    p.user_id,
+    p.name,
+    p.skin_hash,
+    p.cape_hash,
+    p.skin_model,
+    COALESCE(u.created_at, 0) AS created_at,
+    COALESCE(u.updated_at, 0) AS updated_at,
+    ROW_NUMBER() OVER (
+      ORDER BY COALESCE(u.created_at, 0), p.id COLLATE BINARY
+    ) AS global_profile_number,
+    ROW_NUMBER() OVER (
+      PARTITION BY lower(p.name)
+      ORDER BY COALESCE(u.created_at, 0), p.id COLLATE BINARY
+    ) AS case_variant_number,
+    CASE WHEN length(p.name) = 16
+      AND lower(substr(p.name, 1, 1)) = 'x'
+      AND substr(p.name, 2) NOT GLOB '*[^0-9]*'
+      THEN 1 ELSE 0 END AS is_reserved_name
+  FROM profiles p
+  INNER JOIN users u ON u.id = p.user_id
+), named_profiles AS (
+  SELECT
+    ranked_profiles.*,
+    'x' || printf('%015d', global_profile_number) AS generated_name
+  FROM ranked_profiles
+)
 INSERT INTO profiles_new (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
 SELECT
-  p.id,
-  p.user_id,
-  CASE WHEN EXISTS (
-    SELECT 1
-    FROM profiles older
-    INNER JOIN users older_user ON older_user.id = older.user_id
-    WHERE lower(older.name) = lower(p.name)
-      AND (
-        COALESCE(older_user.created_at, 0) < COALESCE(u.created_at, 0)
-        OR (
-          COALESCE(older_user.created_at, 0) = COALESCE(u.created_at, 0)
-          AND older.id < p.id
-        )
-      )
-  ) THEN substr(p.name, 1, 7) || '_' || substr(replace(lower(p.id), '-', ''), -8)
-  ELSE p.name END,
-  p.skin_hash,
-  p.cape_hash,
-  p.skin_model,
-  COALESCE((SELECT u.created_at FROM users u WHERE u.id = p.user_id), 0),
-  COALESCE((SELECT u.updated_at FROM users u WHERE u.id = p.user_id), 0)
-FROM profiles p
-INNER JOIN users u ON u.id = p.user_id;
+  id,
+  user_id,
+  CASE WHEN case_variant_number > 1 OR is_reserved_name = 1 THEN generated_name ELSE name END,
+  skin_hash,
+  cape_hash,
+  skin_model,
+  created_at,
+  updated_at
+FROM named_profiles;
 
 DROP TABLE profiles;
 ALTER TABLE profiles_new RENAME TO profiles;
