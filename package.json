@@ -10,6 +10,7 @@
     "format:check": "pnpm --filter @skinless/frontend format:check",
     "typecheck": "tsc --noEmit && pnpm --filter @skinless/frontend typecheck",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:frontend": "pnpm --filter @skinless/frontend test",
     "test:frontend:coverage": "pnpm --filter @skinless/frontend test:coverage",
     "test:watch": "vitest",
@@ -21,6 +22,7 @@
     "hono": "^4.6.14"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.12.20",
     "@cloudflare/workers-types": "^4.20240919.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.1",
