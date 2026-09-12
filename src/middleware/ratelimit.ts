@@ -118,6 +118,18 @@ export function checkLoginLimit(
   });
 }
 
+export function admitLoginAttempt(
+  env: RateLimiterEnvironment,
+  clientKey: string,
+): Promise<RateLimitResponse> {
+  return requestRateLimit(env, `login:${clientKey}`, {
+    action: 'admit',
+    windowMs: LOGIN_WINDOW_MS,
+    limit: LOGIN_FAILURE_LIMIT,
+    blockMs: LOGIN_BLOCK_MS,
+  });
+}
+
 export function recordLoginFailureDistributed(
   env: RateLimiterEnvironment,
   clientKey: string,

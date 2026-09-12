@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  admitLoginAttempt,
   checkLoginLimit,
   clearLoginFailuresDistributed,
   recordLoginFailureDistributed,
@@ -52,6 +53,18 @@ describe('distributed rate limiter adapter', () => {
     ]);
   });
 
+  it('routes login admissions through the atomic Durable Object action', async () => {
+    const namespace = new RecordingNamespace();
+
+    await admitLoginAttempt({ RATE_LIMITER: namespace }, '198.51.100.15');
+
+    expect(namespace.names).toEqual(['login:198.51.100.15']);
+    expect(namespace.requests).toEqual([{
+      name: 'login:198.51.100.15',
+      body: { action: 'admit', windowMs: 900000, limit: 5, blockMs: 900000 },
+    }]);
+  });
+
   it('keeps registration IP and normalized email windows separate', async () => {
     const namespace = new RecordingNamespace();
     const env = { RATE_LIMITER: namespace };
@@ -99,5 +112,20 @@ describe('distributed rate limiter adapter', () => {
       blocked: true,
       failedCount: 3,
     });
+  });
+
+  it('atomically admits only five concurrent login attempts for one key', async () => {
+    const env = { RATE_LIMITER: createTestRateLimiterNamespace() };
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => admitLoginAttempt(env, '198.51.100.14')),
+    );
+
+    expect(results.filter((result) => result.allowed).map((result) => result.failedCount).sort((left, right) => left - right))
+      .toEqual([1, 2, 3, 4, 5]);
+    const blocked = results.filter((result) => !result.allowed);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]).toMatchObject({ allowed: false, blocked: true, failedCount: 5 });
+    expect(blocked[0]?.retryAfter).toBeGreaterThan(0);
+    expect(blocked[0]?.retryAfter).toBeLessThanOrEqual(900000);
   });
 });

@@ -11,6 +11,7 @@ import {
   rotateToken,
 } from '../db/queries';
 import {
+  admitLoginAttempt,
   checkLoginLimit,
   clearLoginFailuresDistributed,
   getClientKey,
@@ -92,8 +93,8 @@ async function readTokenContext(c: Context<AppEnv>, body: TokenRequest) {
 
 routes.post('/authserver/authenticate', async (c) => {
   const clientKey = getClientKey(c.req.raw);
-  const limit = await checkLoginLimit(c.env, clientKey);
-  if (!limit.allowed) {
+  const admission = await admitLoginAttempt(c.env, clientKey);
+  if (!admission.allowed) {
     return yggError(c, 403, 'Too many failed login attempts. Try again later.');
   }
 
@@ -103,14 +104,13 @@ routes.post('/authserver/authenticate', async (c) => {
   if (!username || !password) return yggError(c, 400, 'username and password are required.');
   if (password.length > 256) return yggError(c, 400, 'password must be 256 characters or fewer.');
 
-  if (limit.failedCount >= LOGIN_TURNSTILE_THRESHOLD) {
+  if (admission.failedCount > LOGIN_TURNSTILE_THRESHOLD) {
     const turnstileValid = await verifyTurnstileToken(
       turnstileTokenFromBody(body),
       c.env.TURNSTILE_SECRET_KEY,
       { remoteIp: clientKey === 'unknown' ? undefined : clientKey },
     );
     if (!turnstileValid) {
-      await recordLoginFailureDistributed(c.env, clientKey);
       return invalidCredentials(c);
     }
   }
@@ -119,7 +119,6 @@ routes.post('/authserver/authenticate', async (c) => {
   const user = await findUserByEmail(c.env.DB, email);
   const passwordMatches = user ? await verifyPassword(password, user.salt, user.password) : false;
   if (!user || !passwordMatches) {
-    await recordLoginFailureDistributed(c.env, clientKey);
     return invalidCredentials(c);
   }
 

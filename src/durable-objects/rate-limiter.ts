@@ -1,6 +1,6 @@
 const STATE_KEY = 'window';
 
-export type RateLimitAction = 'check' | 'record' | 'clear';
+export type RateLimitAction = 'check' | 'record' | 'admit' | 'clear';
 
 export interface RateLimitRequest {
   action: RateLimitAction;
@@ -54,7 +54,7 @@ function isValidRequest(value: unknown): value is RateLimitRequest {
   if (typeof value !== 'object' || value === null) return false;
   const request = value as Partial<RateLimitRequest>;
   return (
-    (request.action === 'check' || request.action === 'record' || request.action === 'clear') &&
+    (request.action === 'check' || request.action === 'record' || request.action === 'admit' || request.action === 'clear') &&
     isPositiveFiniteNumber(request.windowMs) &&
     isPositiveFiniteNumber(request.limit) &&
     isPositiveFiniteNumber(request.blockMs) &&
