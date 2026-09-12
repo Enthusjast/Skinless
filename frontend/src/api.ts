@@ -16,6 +16,37 @@ export interface ProfileCollection {
   defaultProfileId: string | null;
 }
 
+export type WardrobeTextureType = 'skin' | 'cape';
+export type WardrobeTextureModel = 'classic' | 'slim' | null;
+
+export interface WardrobeTexture {
+  id: string;
+  hash: string;
+  type: WardrobeTextureType;
+  name: string;
+  model: WardrobeTextureModel;
+  width: number;
+  height: number;
+  size: number;
+  createdAt: number;
+  updatedAt: number;
+  previewUrl: string;
+}
+
+export interface WardrobeQuota {
+  used: number;
+  limit: number;
+}
+
+export interface WardrobeResponse {
+  textures: WardrobeTexture[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  quota: WardrobeQuota;
+}
+
 export interface ApiUser {
   id: string;
   email: string;
@@ -301,6 +332,64 @@ export function setDefaultProfile(
   return managementRequest<{ user: ApiUser } & ProfileCollection>(
     `/api/user/profiles/${encodeURIComponent(profileId)}/default`,
     { method: 'PUT' },
+  );
+}
+
+export function getWardrobe(
+  options: {
+    type?: WardrobeTextureType;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<WardrobeResponse> {
+  const params = new URLSearchParams();
+  if (options.type) params.set('type', options.type);
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.offset !== undefined) params.set('offset', String(options.offset));
+  const query = params.toString();
+  return managementRequest<WardrobeResponse>(`/api/user/wardrobe${query ? `?${query}` : ''}`);
+}
+
+export function uploadWardrobeTexture(
+  type: WardrobeTextureType,
+  file: Blob,
+  name: string,
+  model: Exclude<WardrobeTextureModel, null> = 'classic',
+): Promise<{ texture: WardrobeTexture; quota: WardrobeQuota; reused: boolean }> {
+  const form = new FormData();
+  form.set('file', file, `${type}.png`);
+  form.set('type', type);
+  form.set('name', name);
+  if (type === 'skin') form.set('model', model);
+  return managementRequest<{ texture: WardrobeTexture; quota: WardrobeQuota; reused: boolean }>(
+    '/api/user/wardrobe',
+    { method: 'POST', body: form },
+  );
+}
+
+export function renameWardrobeTexture(
+  textureId: string,
+  name: string,
+): Promise<{ texture: WardrobeTexture }> {
+  return managementRequest<{ texture: WardrobeTexture }>(
+    `/api/user/wardrobe/${encodeURIComponent(textureId)}`,
+    { method: 'PATCH', body: JSON.stringify({ name }) },
+  );
+}
+
+export function deleteWardrobeTexture(textureId: string): Promise<void> {
+  return managementRequest<void>(`/api/user/wardrobe/${encodeURIComponent(textureId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function applyWardrobeTexture(
+  textureId: string,
+  profileId: string,
+): Promise<{ texture: WardrobeTexture; profile: ApiProfile }> {
+  return managementRequest<{ texture: WardrobeTexture; profile: ApiProfile }>(
+    `/api/user/wardrobe/${encodeURIComponent(textureId)}/apply`,
+    { method: 'POST', body: JSON.stringify({ profileId }) },
   );
 }
 

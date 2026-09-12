@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { LayoutDashboard, LogOut, Menu, Palette, Shield, UserRound, X } from 'lucide-vue-next';
+import {
+  ImagePlus,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Palette,
+  Shield,
+  UserRound,
+  X,
+} from 'lucide-vue-next';
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router';
 import PageHeader from '../components/common/PageHeader.vue';
 import ThemeToggle from '../components/ThemeToggle.vue';
@@ -76,6 +85,14 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
           @click="sidebarOpen = false"
         >
           <Palette :size="18" aria-hidden="true" /><span>角色外观</span>
+        </RouterLink>
+        <RouterLink
+          class="workspace-nav-link"
+          to="/dashboard/wardrobe"
+          :class="{ active: route.path === '/dashboard/wardrobe' }"
+          @click="sidebarOpen = false"
+        >
+          <ImagePlus :size="18" aria-hidden="true" /><span>纹理衣柜</span>
         </RouterLink>
         <RouterLink
           class="workspace-nav-link"

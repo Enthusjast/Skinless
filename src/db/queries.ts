@@ -7,6 +7,7 @@ import type {
   SkinModel,
   WebSessionRecord,
 } from '../types';
+import type { TextureType, TextureWardrobeRecord } from '../utils/wardrobe';
 
 export interface TokenContextRow extends TokenRecord {
   user_email: string;
@@ -37,6 +38,12 @@ export interface WebSessionSummary {
 }
 
 export const MAX_PROFILES_PER_USER = 5;
+
+export interface TextureProfileReference {
+  id: string;
+  name: string;
+  asset: TextureType;
+}
 
 export async function findUserByEmail(db: D1Database, email: string): Promise<UserRecord | null> {
   return db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first<UserRecord>();
@@ -413,6 +420,165 @@ export async function updateProfileAsset(
   }
 
   await db.prepare('UPDATE profiles SET cape_hash = ? WHERE id = ?').bind(hash, profileId).run();
+}
+
+export async function findTextureByIdForUser(
+  db: D1Database,
+  textureId: string,
+  userId: string,
+): Promise<TextureWardrobeRecord | null> {
+  return db
+    .prepare('SELECT * FROM texture_wardrobe WHERE id = ? AND user_id = ? LIMIT 1')
+    .bind(textureId, userId)
+    .first<TextureWardrobeRecord>();
+}
+
+export async function findTextureByUserHashAndType(
+  db: D1Database,
+  userId: string,
+  hash: string,
+  textureType: TextureType,
+): Promise<TextureWardrobeRecord | null> {
+  return db
+    .prepare(
+      `SELECT * FROM texture_wardrobe
+       WHERE user_id = ? AND hash = ? AND texture_type = ?
+       LIMIT 1`,
+    )
+    .bind(userId, hash, textureType)
+    .first<TextureWardrobeRecord>();
+}
+
+export async function countTexturesByUserId(db: D1Database, userId: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ?')
+    .bind(userId)
+    .first<{ count: number }>();
+  return Number(row?.count ?? 0);
+}
+
+export async function listTexturesByUserId(
+  db: D1Database,
+  userId: string,
+  textureType: TextureType | null,
+  limit: number,
+  offset: number,
+): Promise<TextureWardrobeRecord[]> {
+  const statement = textureType
+    ? db
+      .prepare(
+        `SELECT * FROM texture_wardrobe
+         WHERE user_id = ? AND texture_type = ?
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .bind(userId, textureType, limit, offset)
+    : db
+      .prepare(
+        `SELECT * FROM texture_wardrobe
+         WHERE user_id = ?
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .bind(userId, limit, offset);
+  const result = await statement.all<TextureWardrobeRecord>();
+  return result.results;
+}
+
+export async function countTexturesByUserIdAndType(
+  db: D1Database,
+  userId: string,
+  textureType: TextureType | null,
+): Promise<number> {
+  const statement = textureType
+    ? db.prepare(
+      'SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ? AND texture_type = ?',
+    ).bind(userId, textureType)
+    : db.prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE user_id = ?').bind(userId);
+  const row = await statement.first<{ count: number }>();
+  return Number(row?.count ?? 0);
+}
+
+export async function insertTextureBelowLimit(
+  db: D1Database,
+  texture: TextureWardrobeRecord,
+  limit: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `INSERT INTO texture_wardrobe
+       (id, user_id, hash, texture_type, name, model, width, height, size, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM texture_wardrobe WHERE user_id = ?) < ?
+       ON CONFLICT (user_id, hash, texture_type) DO NOTHING`,
+    )
+    .bind(
+      texture.id,
+      texture.user_id,
+      texture.hash,
+      texture.texture_type,
+      texture.name,
+      texture.model,
+      texture.width,
+      texture.height,
+      texture.size,
+      texture.created_at,
+      texture.updated_at,
+      texture.user_id,
+      limit,
+    )
+    .run();
+  return (result.meta?.changes ?? 1) > 0;
+}
+
+export async function updateTextureName(
+  db: D1Database,
+  textureId: string,
+  userId: string,
+  name: string,
+  updatedAt: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare('UPDATE texture_wardrobe SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+    .bind(name, updatedAt, textureId, userId)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function deleteTextureById(
+  db: D1Database,
+  textureId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = await db
+    .prepare('DELETE FROM texture_wardrobe WHERE id = ? AND user_id = ?')
+    .bind(textureId, userId)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function listTextureProfileReferences(
+  db: D1Database,
+  texture: Pick<TextureWardrobeRecord, 'user_id' | 'hash' | 'texture_type'>,
+): Promise<TextureProfileReference[]> {
+  const column = texture.texture_type === 'skin' ? 'skin_hash' : 'cape_hash';
+  const result = await db
+    .prepare(
+      `SELECT id, name FROM profiles
+       WHERE user_id = ? AND ${column} = ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .bind(texture.user_id, texture.hash)
+    .all<{ id: string; name: string }>();
+  return result.results.map((profile) => ({ ...profile, asset: texture.texture_type }));
+}
+
+export async function countTextureRecordsByHash(db: D1Database, hash: string): Promise<number> {
+  const row = await db
+    .prepare('SELECT COUNT(*) AS count FROM texture_wardrobe WHERE hash = ?')
+    .bind(hash)
+    .first<{ count: number }>();
+  return Number(row?.count ?? 0);
 }
 
 export async function updateUserRole(db: D1Database, userId: string, role: UserRole, updatedAt: number): Promise<void> {

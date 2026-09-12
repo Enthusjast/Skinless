@@ -30,6 +30,15 @@ const router = createRouter({
           },
         },
         {
+          path: 'dashboard/wardrobe',
+          component: () => import('./views/WardrobeView.vue'),
+          meta: {
+            title: '纹理衣柜',
+            eyebrow: 'PRIVATE WARDROBE',
+            description: '保存、预览并将私人皮肤和披风应用到任意 Profile。',
+          },
+        },
+        {
           path: 'admin',
           component: () => import('./views/AdminView.vue'),
           meta: {

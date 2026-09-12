@@ -2,19 +2,28 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import {
   countAssetReferences,
+  countTextureRecordsByHash,
+  countTexturesByUserId,
+  countTexturesByUserIdAndType,
   countProfilesByUserId,
+  deleteTextureById,
   deleteProfile,
   deleteUserTokens,
   findDefaultProfileByUserId,
+  findTextureByIdForUser,
+  findTextureByUserHashAndType,
   findUserByEmail,
   findUserById,
   findProfileByIdForUser,
   findProfileByName,
   insertProfileBelowLimit,
+  insertTextureBelowLimit,
   insertUserAndProfile,
   insertWebSession,
   isConstraintViolation,
   listUsers,
+  listTextureProfileReferences,
+  listTexturesByUserId,
   listProfilesByUserId,
   findWebSessionById,
   listWebSessions,
@@ -25,6 +34,7 @@ import {
   updatePassword,
   updateProfileName,
   updateProfileAsset,
+  updateTextureName,
   updateUserRole,
   MAX_PROFILES_PER_USER,
   setDefaultProfile,
@@ -42,6 +52,15 @@ import { turnstileTokenFromBody, verifyTurnstileToken } from '../utils/turnstile
 import { serializeProfile, serializeUser, serializeUserWithProfile } from '../utils/serializers';
 import { normalizePng, type AssetKind } from '../utils/png';
 import { generateProfileId, generateUserId } from '../utils/uuid';
+import { getTextureUrl } from '../utils/config';
+import {
+  isTextureModelCompatible,
+  MAX_TEXTURES_PER_USER,
+  parseTextureType,
+  parseWardrobePage,
+  textureName,
+  type TextureWardrobeRecord,
+} from '../utils/wardrobe';
 import {
   ACCESS_TOKEN_TTL_MS,
   WEB_SESSION_TTL_MS,
@@ -79,6 +98,10 @@ interface RoleInput {
 
 interface ProfileNameInput {
   name?: unknown;
+}
+
+interface WardrobeApplyInput {
+  profileId?: unknown;
 }
 
 type MultipartBody = Record<string, string | File | (string | File)[]>;
@@ -156,12 +179,57 @@ function assetHash(profile: ProfileRecord, asset: AssetKind): string | null {
 
 async function removeIfUnreferenced(c: Context<AppEnv>, hash: string | null): Promise<void> {
   if (!hash) return;
-  if (await countAssetReferences(c.env.DB, hash) === 0) {
+  const profileReferences = await countAssetReferences(c.env.DB, hash);
+  const wardrobeReferences = await countTextureRecordsByHash(c.env.DB, hash);
+  if (profileReferences === 0 && wardrobeReferences === 0) {
     await c.env.BUCKET.delete(`${hash}.png`);
   }
 }
 
-async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Response> {
+function textureNotFound(c: Context<AppEnv>): Response {
+  return jsonError(c, 404, 'Texture not found.', 'NotFound', 'texture_not_found');
+}
+
+function textureQuotaReached(c: Context<AppEnv>): Response {
+  return jsonError(c, 409, 'Each account may have up to 50 saved textures.', 'Conflict', 'texture_quota_reached');
+}
+
+function textureNameInvalid(c: Context<AppEnv>): Response {
+  return jsonError(c, 400, 'Texture name must be 1-64 characters without line breaks.', 'IllegalArgumentException', 'texture_name_invalid');
+}
+
+function textureModelMismatch(c: Context<AppEnv>): Response {
+  return jsonError(c, 409, 'The texture model does not match the target profile.', 'Conflict', 'texture_model_mismatch');
+}
+
+function serializeTexture(c: Context<AppEnv>, texture: TextureWardrobeRecord) {
+  return {
+    id: texture.id,
+    hash: texture.hash,
+    type: texture.texture_type,
+    name: texture.name,
+    model: texture.model,
+    width: texture.width,
+    height: texture.height,
+    size: texture.size,
+    createdAt: texture.created_at,
+    updatedAt: texture.updated_at,
+    previewUrl: getTextureUrl(c, texture.hash),
+  };
+}
+
+async function wardrobeQuota(c: Context<AppEnv>) {
+  return {
+    used: await countTexturesByUserId(c.env.DB, c.get('user').id),
+    limit: MAX_TEXTURES_PER_USER,
+  };
+}
+
+async function uploadAsset(
+  c: Context<AppEnv>,
+  requestedAsset: AssetKind | null,
+  applyToDefaultProfile: boolean,
+): Promise<Response> {
   let body: MultipartBody;
   try {
     body = await c.req.parseBody() as MultipartBody;
@@ -169,8 +237,11 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
     return jsonError(c, 400, 'A multipart/form-data body is required.');
   }
 
+  const asset = requestedAsset ?? parseTextureType(body.type ?? body.texture_type);
+  if (!asset) return jsonError(c, 400, 'type must be skin or cape.', 'IllegalArgumentException', 'invalid_texture_type');
+
   const file = assetFile(body, asset);
-  if (!file) return jsonError(c, 400, `${asset} file is required.`);
+  if (!file) return jsonError(c, 400, `${asset} file is required.`, 'IllegalArgumentException', 'texture_file_required');
   if (file.type && file.type !== 'image/png') {
     return jsonError(c, 400, 'Only PNG files are supported.', 'IllegalArgumentException', 'unsupported_format');
   }
@@ -187,11 +258,12 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   }
 
   const profile = c.get('profile');
-  const selectedModel = skinModel(body.skin_model);
-  if (asset === 'skin' && body.skin_model !== undefined && !selectedModel) {
-    return jsonError(c, 400, 'skin_model must be classic or slim.');
+  const requestedModel = body.model ?? body.skin_model;
+  const selectedModel = skinModel(requestedModel);
+  if (asset === 'skin' && requestedModel !== undefined && !selectedModel) {
+    return jsonError(c, 400, 'model must be classic or slim.', 'IllegalArgumentException', 'invalid_texture_model');
   }
-  const model = selectedModel ?? profile.skin_model;
+  const model = asset === 'skin' ? (selectedModel ?? profile.skin_model) : null;
 
   const hash = await sha256Hex(normalized.bytes);
   const clientHash = asString(body.sha256);
@@ -201,6 +273,37 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   if (clientHash && clientHash.toLowerCase() !== hash) {
     return jsonError(c, 400, 'The uploaded file hash does not match its contents.');
   }
+
+  const name = textureName(body.name, asset);
+  if (!name) return textureNameInvalid(c);
+
+  const userId = c.get('user').id;
+  let texture = await findTextureByUserHashAndType(c.env.DB, userId, hash, asset);
+  let reused = texture !== null;
+  if (texture && !isTextureModelCompatible(texture, model ?? profile.skin_model)) {
+    return textureModelMismatch(c);
+  }
+
+  if (!texture) {
+    if (await countTexturesByUserId(c.env.DB, userId) >= MAX_TEXTURES_PER_USER) {
+      return textureQuotaReached(c);
+    }
+    const now = Date.now();
+    texture = {
+      id: generateProfileId(),
+      user_id: userId,
+      hash,
+      texture_type: asset,
+      name,
+      model,
+      width: normalized.width,
+      height: normalized.height,
+      size: normalized.bytes.byteLength,
+      created_at: now,
+      updated_at: now,
+    };
+  }
+
   const key = `${hash}.png`;
   if (!await c.env.BUCKET.head(key)) {
     await c.env.BUCKET.put(key, normalized.bytes, {
@@ -211,20 +314,51 @@ async function uploadAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
     });
   }
 
-  const previousHash = assetHash(profile, asset);
-  await updateProfileAsset(c.env.DB, profile.id, asset, hash, model);
-  if (previousHash && previousHash !== hash) await removeIfUnreferenced(c, previousHash);
+  if (!reused) {
+    try {
+      const inserted = await insertTextureBelowLimit(c.env.DB, texture, MAX_TEXTURES_PER_USER);
+      if (!inserted) {
+        const concurrent = await findTextureByUserHashAndType(c.env.DB, userId, hash, asset);
+        if (!concurrent) {
+          await removeIfUnreferenced(c, hash);
+          return textureQuotaReached(c);
+        }
+        texture = concurrent;
+        reused = true;
+        if (!isTextureModelCompatible(texture, model ?? profile.skin_model)) {
+          return textureModelMismatch(c);
+        }
+      }
+    } catch (error) {
+      if (!isConstraintViolation(error)) throw error;
+      const concurrent = await findTextureByUserHashAndType(c.env.DB, userId, hash, asset);
+      if (!concurrent) throw error;
+      texture = concurrent;
+      reused = true;
+    }
+  }
 
-  const nextProfile: ProfileRecord = asset === 'skin'
-    ? { ...profile, skin_hash: hash, skin_model: model }
-    : { ...profile, cape_hash: hash };
+  let nextProfile = profile;
+  if (applyToDefaultProfile) {
+    const previousHash = assetHash(profile, asset);
+    await updateProfileAsset(c.env.DB, profile.id, asset, hash, texture.model ?? profile.skin_model);
+    nextProfile = asset === 'skin'
+      ? { ...profile, skin_hash: hash, skin_model: texture.model ?? profile.skin_model }
+      : { ...profile, cape_hash: hash };
+    if (previousHash && previousHash !== hash) await removeIfUnreferenced(c, previousHash);
+  }
+
+  const quota = await wardrobeQuota(c);
   return c.json({
     asset,
     hash,
     profile: serializeProfile(nextProfile),
+    texture: serializeTexture(c, texture),
+    quota,
+    reused,
     dimensions: { ok: true, width: normalized.width, height: normalized.height },
     sourceDimensions: { width: normalized.sourceWidth, height: normalized.sourceHeight },
-  }, 201);
+  }, reused ? 200 : 201);
 }
 
 async function deleteAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Response> {
@@ -233,6 +367,87 @@ async function deleteAsset(c: Context<AppEnv>, asset: AssetKind): Promise<Respon
   await updateProfileAsset(c.env.DB, profile.id, asset, null, profile.skin_model);
   await removeIfUnreferenced(c, previousHash);
   return c.body(null, 204);
+}
+
+async function wardrobeCollection(c: Context<AppEnv>): Promise<Response> {
+  const rawType = c.req.query('type') ?? c.req.query('texture_type');
+  const textureType = rawType === undefined ? null : parseTextureType(rawType);
+  if (rawType !== undefined && !textureType) {
+    return jsonError(c, 400, 'type must be skin or cape.', 'IllegalArgumentException', 'invalid_texture_type');
+  }
+  const { limit, offset } = parseWardrobePage({
+    limit: c.req.query('limit'),
+    offset: c.req.query('offset'),
+  });
+  const userId = c.get('user').id;
+  const [textures, total, quota] = await Promise.all([
+    listTexturesByUserId(c.env.DB, userId, textureType, limit, offset),
+    countTexturesByUserIdAndType(c.env.DB, userId, textureType),
+    wardrobeQuota(c),
+  ]);
+  return c.json({
+    textures: textures.map((texture) => serializeTexture(c, texture)),
+    total,
+    limit,
+    offset,
+    hasMore: offset + textures.length < total,
+    quota,
+  });
+}
+
+async function renameTexture(c: Context<AppEnv>): Promise<Response> {
+  const texture = await findTextureByIdForUser(c.env.DB, c.req.param('id') ?? '', c.get('user').id);
+  if (!texture) return textureNotFound(c);
+  const body = await readJson<ProfileNameInput>(c);
+  if (body?.name === undefined) {
+    return jsonError(c, 400, 'name is required.', 'IllegalArgumentException', 'texture_name_required');
+  }
+  if (typeof body.name === 'string' && !body.name.trim()) return textureNameInvalid(c);
+  const name = textureName(body.name, texture.texture_type);
+  if (!name) return textureNameInvalid(c);
+  const updatedAt = Date.now();
+  if (!await updateTextureName(c.env.DB, texture.id, c.get('user').id, name, updatedAt)) {
+    return textureNotFound(c);
+  }
+  return c.json({
+    texture: serializeTexture(c, { ...texture, name, updated_at: updatedAt }),
+  });
+}
+
+async function deleteTexture(c: Context<AppEnv>): Promise<Response> {
+  const texture = await findTextureByIdForUser(c.env.DB, c.req.param('id') ?? '', c.get('user').id);
+  if (!texture) return textureNotFound(c);
+  const profiles = await listTextureProfileReferences(c.env.DB, texture);
+  if (profiles.length > 0) {
+    return c.json({
+      error: 'Conflict',
+      errorMessage: 'The texture is still applied to one or more profiles.',
+      errorCode: 'texture_in_use',
+      profiles: profiles.map(({ id, name }) => ({ id, name })),
+    }, 409);
+  }
+  if (!await deleteTextureById(c.env.DB, texture.id, c.get('user').id)) return textureNotFound(c);
+  await removeIfUnreferenced(c, texture.hash);
+  return c.body(null, 204);
+}
+
+async function applyTexture(c: Context<AppEnv>): Promise<Response> {
+  const texture = await findTextureByIdForUser(c.env.DB, c.req.param('id') ?? '', c.get('user').id);
+  if (!texture) return textureNotFound(c);
+  const body = await readJson<WardrobeApplyInput>(c);
+  const profileId = asString(body?.profileId);
+  const profile = await ownedProfile(c, profileId ?? undefined);
+  if (!profile) return profileNotFound(c);
+  if (!isTextureModelCompatible(texture, profile)) return textureModelMismatch(c);
+
+  const previousHash = assetHash(profile, texture.texture_type);
+  await updateProfileAsset(c.env.DB, profile.id, texture.texture_type, texture.hash, texture.model ?? profile.skin_model);
+  const nextProfile = texture.texture_type === 'skin'
+    ? { ...profile, skin_hash: texture.hash, skin_model: texture.model ?? profile.skin_model }
+    : { ...profile, cape_hash: texture.hash };
+  if (c.get('profile').id === profile.id) c.set('profile', nextProfile);
+  if (previousHash && previousHash !== texture.hash) await removeIfUnreferenced(c, previousHash);
+  return c.json({ texture: serializeTexture(c, texture), profile: serializeProfile(nextProfile) });
 }
 
 routes.post('/register', async (c) => {
@@ -572,9 +787,16 @@ routes.put('/user/password', authMiddleware, async (c) => {
   return c.body(null, 204);
 });
 
-routes.post('/user/skin', authMiddleware, (c) => uploadAsset(c, 'skin'));
+routes.get('/user/wardrobe', authMiddleware, (c) => wardrobeCollection(c));
+routes.post('/user/wardrobe', authMiddleware, (c) => uploadAsset(c, null, false));
+routes.patch('/user/wardrobe/:id', authMiddleware, renameTexture);
+routes.put('/user/wardrobe/:id', authMiddleware, renameTexture);
+routes.delete('/user/wardrobe/:id', authMiddleware, deleteTexture);
+routes.post('/user/wardrobe/:id/apply', authMiddleware, applyTexture);
+
+routes.post('/user/skin', authMiddleware, (c) => uploadAsset(c, 'skin', true));
 routes.delete('/user/skin', authMiddleware, (c) => deleteAsset(c, 'skin'));
-routes.post('/user/cape', authMiddleware, (c) => uploadAsset(c, 'cape'));
+routes.post('/user/cape', authMiddleware, (c) => uploadAsset(c, 'cape', true));
 routes.delete('/user/cape', authMiddleware, (c) => deleteAsset(c, 'cape'));
 
 routes.get('/admin/users', authMiddleware, adminMiddleware, async (c) => {
