@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import {
   completeEmailChange,
   completePasswordReset,
+  claimAccountChallengeResend,
   deleteUserTokens,
   findAccountChallengeById,
   findAccountChallengeByUserAndPurpose,
@@ -143,6 +144,16 @@ function currentPasswordIncorrect(c: Context<AppEnv>): Response {
   );
 }
 
+function currentPasswordRequired(c: Context<AppEnv>): Response {
+  return jsonError(
+    c,
+    400,
+    'currentPassword is required.',
+    'IllegalArgumentException',
+    'current_password_required',
+  );
+}
+
 function mailSender(c: Context<AppEnv>): MailSender | null {
   if (c.env.MAIL_SENDER) return c.env.MAIL_SENDER;
   if (!isMailConfigured({ apiKey: c.env.RESEND_API_KEY, from: c.env.MAIL_FROM })) return null;
@@ -249,6 +260,31 @@ function passwordResetResponse(
     },
     202,
   );
+}
+
+function passwordResetResendResponse(
+  c: Context<AppEnv>,
+  challengeId: string,
+  now: number,
+): Response {
+  return passwordResetResponse(
+    c,
+    challengeId,
+    now + ACCOUNT_CHALLENGE_CODE_TTL_MS,
+    now,
+  );
+}
+
+function resendCooldown(c: Context<AppEnv>, resendAt: number): Response {
+  const response = jsonError(
+    c,
+    429,
+    'Please wait before requesting another code.',
+    'TooManyRequests',
+    'resend_cooldown',
+  );
+  response.headers.set('Retry-After', String(Math.max(1, Math.ceil((resendAt - Date.now()) / 1000))));
+  return response;
 }
 
 function challengeIdFromBody(body: PasswordResetInput | EmailChangeInput): string | null {
@@ -377,28 +413,27 @@ routes.post('/auth/password/reset/start', async (c) => {
 
 routes.post('/auth/password/reset/resend', async (c) => {
   const body = await readJson<PasswordResetInput>(c);
-  const challenge = await resetChallengeFromBody(c, body ?? {});
+  const publicChallengeId = challengeIdFromBody(body ?? {}) ?? generateUserId();
   const now = Date.now();
-  if (!challenge) return passwordResetResponse(c, generateUserId(), now + ACCOUNT_CHALLENGE_CODE_TTL_MS, now);
-  if (challenge.expires_at <= now) return invalidVerification(c);
-
-  const resendAt = challenge.last_sent_at + ACCOUNT_CHALLENGE_RESEND_DELAY_MS;
-  if (resendAt > now) {
-    const response = jsonError(c, 429, 'Please wait before requesting another code.', 'TooManyRequests', 'resend_cooldown');
-    response.headers.set('Retry-After', String(Math.ceil((resendAt - now) / 1000)));
-    return response;
-  }
-
-  const rateLimitError = await challengeRateLimit(c, PASSWORD_RESET_PURPOSE, challenge.email);
-  if (rateLimitError) return rateLimitError;
+  const genericResponse = () => passwordResetResendResponse(c, publicChallengeId, Date.now());
+  const clientKey = getClientKey(c.req.raw);
+  const ipRateLimit = await recordAccountChallengeIpAttempt(c.env, PASSWORD_RESET_PURPOSE, clientKey);
+  if (!ipRateLimit.allowed) return genericResponse();
   const turnstileFailure = await turnstileError(c, body ?? {}, 'Password reset verification failed.');
   if (turnstileFailure) return turnstileFailure;
 
-  const code = generateVerificationCode();
-  if (!await deliverRecoveryCode(c, challenge.email, code)) {
-    return passwordResetResponse(c, challenge.id, challenge.expires_at, challenge.last_sent_at);
-  }
+  const challenge = await resetChallengeFromBody(c, body ?? {});
+  if (!challenge || challenge.expires_at <= now) return genericResponse();
+  if (challenge.last_sent_at + ACCOUNT_CHALLENGE_RESEND_DELAY_MS > now) return genericResponse();
+
+  const emailRateLimit = await recordAccountChallengeEmailAttempt(c.env, PASSWORD_RESET_PURPOSE, challenge.email);
+  if (!emailRateLimit.allowed) return genericResponse();
+
   const sentAt = Date.now();
+  const claimed = await claimAccountChallengeResend(c.env.DB, challenge, sentAt);
+  if (!claimed) return genericResponse();
+  const code = generateVerificationCode();
+  if (!await deliverRecoveryCode(c, challenge.email, code)) return genericResponse();
   const expiresAt = sentAt + ACCOUNT_CHALLENGE_CODE_TTL_MS;
   const updated = await updateAccountChallenge(
     c.env.DB,
@@ -408,8 +443,8 @@ routes.post('/auth/password/reset/resend', async (c) => {
     expiresAt,
   );
   return updated
-    ? passwordResetResponse(c, challenge.id, expiresAt, sentAt)
-    : invalidVerification(c);
+    ? passwordResetResponse(c, publicChallengeId, expiresAt, sentAt)
+    : genericResponse();
 });
 
 routes.post('/auth/password/reset/verify', async (c) => {
@@ -503,21 +538,19 @@ routes.post('/user/email/change/resend', authMiddleware, async (c) => {
   const now = Date.now();
   if (challenge.expires_at <= now) return invalidVerification(c);
   const resendAt = challenge.last_sent_at + ACCOUNT_CHALLENGE_RESEND_DELAY_MS;
-  if (resendAt > now) {
-    const response = jsonError(c, 429, 'Please wait before requesting another code.', 'TooManyRequests', 'resend_cooldown');
-    response.headers.set('Retry-After', String(Math.ceil((resendAt - now) / 1000)));
-    return response;
-  }
+  if (resendAt > now) return resendCooldown(c, resendAt);
   const duplicate = await findUserByEmail(c.env.DB, challenge.email);
   if (duplicate && duplicate.id !== c.get('user').id) return duplicateEmail(c);
   const rateLimitError = await challengeRateLimit(c, EMAIL_CHANGE_PURPOSE, challenge.email);
   if (rateLimitError) return rateLimitError;
   const turnstileFailure = await turnstileError(c, body ?? {}, 'Email change verification failed.');
   if (turnstileFailure) return turnstileFailure;
+  const sentAt = Date.now();
+  const claimed = await claimAccountChallengeResend(c.env.DB, challenge, sentAt);
+  if (!claimed) return resendCooldown(c, sentAt + ACCOUNT_CHALLENGE_RESEND_DELAY_MS);
   const code = generateVerificationCode();
   const deliveryError = await deliverManagedCode(c, EMAIL_CHANGE_PURPOSE, challenge.email, code);
   if (deliveryError) return deliveryError;
-  const sentAt = Date.now();
   const expiresAt = sentAt + ACCOUNT_CHALLENGE_CODE_TTL_MS;
   const updated = await updateAccountChallenge(
     c.env.DB,
@@ -536,7 +569,8 @@ async function completeEmailChangeRoute(c: Context<AppEnv>): Promise<Response> {
   const body = await readJson<EmailChangeInput>(c);
   const suppliedCurrentPassword = currentPasswordFromBody(body ?? {});
   const user = c.get('user');
-  if (suppliedCurrentPassword && !await verifyPassword(suppliedCurrentPassword, user.salt, user.password)) {
+  if (!suppliedCurrentPassword) return currentPasswordRequired(c);
+  if (!await verifyPassword(suppliedCurrentPassword, user.salt, user.password)) {
     return currentPasswordIncorrect(c);
   }
   const code = asString(body?.code);

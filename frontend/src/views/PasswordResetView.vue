@@ -3,6 +3,7 @@ import { ArrowLeft, KeyRound, Mail, RefreshCw } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ApiError, formatApiError } from '../api';
+import TurnstileWidget from '../components/TurnstileWidget.vue';
 import { useAuthStore } from '../stores/auth';
 
 type ResetStep = 'email' | 'verify';
@@ -22,6 +23,8 @@ const expiresAt = ref(0);
 const resendAt = ref(0);
 const clock = ref(Date.now());
 const codeInput = ref<HTMLInputElement | null>(null);
+const turnstileToken = ref('');
+const turnstileWidget = ref<{ reset?: () => void } | null>(null);
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
 
 const resendRemaining = computed(() =>
@@ -78,7 +81,7 @@ async function submitEmail() {
   clearFeedback();
   busy.value = true;
   try {
-    const response = await auth.startPasswordReset(form.email);
+    const response = await auth.startPasswordReset(form.email, turnstileToken.value || undefined);
     challengeId.value = response.challengeId;
     code.value = '';
     form.newPassword = '';
@@ -92,6 +95,8 @@ async function submitEmail() {
   } catch (cause) {
     setFieldError(cause, '重置请求失败，请稍后重试。');
   } finally {
+    turnstileToken.value = '';
+    turnstileWidget.value?.reset?.();
     busy.value = false;
   }
 }
@@ -127,7 +132,10 @@ async function resendCode() {
   clearFeedback();
   resendBusy.value = true;
   try {
-    const response = await auth.resendPasswordReset(challengeId.value);
+    const response = await auth.resendPasswordReset(
+      challengeId.value,
+      turnstileToken.value || undefined,
+    );
     expiresAt.value = response.expiresAt;
     resendAt.value = response.resendAfter;
     code.value = '';
@@ -137,6 +145,8 @@ async function resendCode() {
   } catch (cause) {
     setFieldError(cause, '验证码发送失败，请稍后重试。');
   } finally {
+    turnstileToken.value = '';
+    turnstileWidget.value?.reset?.();
     resendBusy.value = false;
   }
 }
@@ -169,6 +179,12 @@ onUnmounted(() => {
       <h2>{{ step === 'email' ? '重置密码' : '输入验证码' }}</h2>
       <p v-if="step === 'email'">输入邮箱，我们会发送一次性验证码。</p>
       <p v-else>验证码已发送至 {{ form.email }}，请在 10 分钟内完成重置。</p>
+      <TurnstileWidget
+        ref="turnstileWidget"
+        @token="turnstileToken = $event"
+        @expired="turnstileToken = ''"
+        @error="turnstileToken = ''"
+      />
 
       <form v-if="step === 'email'" @submit.prevent="submitEmail">
         <div class="field">

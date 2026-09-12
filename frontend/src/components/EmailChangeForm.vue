@@ -2,6 +2,7 @@
 import { ArrowLeft, MailCheck, RefreshCw } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { ApiError, formatApiError } from '../api';
+import TurnstileWidget from './TurnstileWidget.vue';
 import { useAuthStore } from '../stores/auth';
 
 type EmailStep = 'details' | 'verify';
@@ -21,6 +22,8 @@ const expiresAt = ref(0);
 const resendAt = ref(0);
 const clock = ref(Date.now());
 const codeInput = ref<HTMLInputElement | null>(null);
+const turnstileToken = ref('');
+const turnstileWidget = ref<{ reset?: () => void } | null>(null);
 let countdownTimer: ReturnType<typeof setInterval> | undefined;
 
 const resendRemaining = computed(() =>
@@ -75,7 +78,11 @@ async function submitDetails() {
   clearFeedback();
   busy.value = true;
   try {
-    const response = await auth.startEmailChange(form.currentPassword, form.newEmail);
+    const response = await auth.startEmailChange(
+      form.currentPassword,
+      form.newEmail,
+      turnstileToken.value || undefined,
+    );
     challengeId.value = response.challengeId;
     targetEmail.value = response.email;
     code.value = '';
@@ -88,6 +95,8 @@ async function submitDetails() {
   } catch (cause) {
     setFieldError(cause, '邮箱变更请求失败，请稍后重试。');
   } finally {
+    turnstileToken.value = '';
+    turnstileWidget.value?.reset?.();
     busy.value = false;
   }
 }
@@ -114,7 +123,10 @@ async function resendCode() {
   clearFeedback();
   resendBusy.value = true;
   try {
-    const response = await auth.resendEmailChange(challengeId.value);
+    const response = await auth.resendEmailChange(
+      challengeId.value,
+      turnstileToken.value || undefined,
+    );
     targetEmail.value = response.email;
     expiresAt.value = response.expiresAt;
     resendAt.value = response.resendAfter;
@@ -125,6 +137,8 @@ async function resendCode() {
   } catch (cause) {
     setFieldError(cause, '验证码发送失败，请稍后重试。');
   } finally {
+    turnstileToken.value = '';
+    turnstileWidget.value?.reset?.();
     resendBusy.value = false;
   }
 }
@@ -157,6 +171,12 @@ onUnmounted(() => {
     <p class="section-description">
       当前邮箱：{{ auth.user?.email }}。变更邮箱需要当前密码和新邮箱验证码。
     </p>
+    <TurnstileWidget
+      ref="turnstileWidget"
+      @token="turnstileToken = $event"
+      @expired="turnstileToken = ''"
+      @error="turnstileToken = ''"
+    />
 
     <form v-if="step === 'details'" class="inline-form" @submit.prevent="submitDetails">
       <div class="field">

@@ -451,11 +451,11 @@ describe('API error parsing', () => {
     vi.stubGlobal('fetch', fetchMock);
     setCsrfToken('csrf-token');
 
-    await startPasswordReset(' PLAYER@EXAMPLE.COM ');
-    await resendPasswordReset('reset-1');
+    await startPasswordReset(' PLAYER@EXAMPLE.COM ', 'reset-token');
+    await resendPasswordReset('reset-1', 'reset-resend-token');
     await verifyPasswordReset('reset-1', '731042', 'new-password');
-    await startEmailChange('current-password', 'new@example.com');
-    await resendEmailChange('email-1');
+    await startEmailChange('current-password', 'new@example.com', 'email-token');
+    await resendEmailChange('email-1', 'email-resend-token');
     await completeEmailChange('email-1', '042731', 'current-password');
 
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
@@ -468,6 +468,11 @@ describe('API error parsing', () => {
     ]);
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       email: ' PLAYER@EXAMPLE.COM ',
+      turnstileToken: 'reset-token',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      challengeId: 'reset-1',
+      turnstileToken: 'reset-resend-token',
     });
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
       challengeId: 'reset-1',
@@ -477,6 +482,15 @@ describe('API error parsing', () => {
     expect(new Headers(fetchMock.mock.calls[3]?.[1]?.headers).get('X-CSRF-Token')).toBe(
       'csrf-token',
     );
+    expect(JSON.parse(String(fetchMock.mock.calls[3]?.[1]?.body))).toEqual({
+      currentPassword: 'current-password',
+      newEmail: 'new@example.com',
+      turnstileToken: 'email-token',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({
+      challengeId: 'email-1',
+      turnstileToken: 'email-resend-token',
+    });
     expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
       challengeId: 'email-1',
       code: '042731',

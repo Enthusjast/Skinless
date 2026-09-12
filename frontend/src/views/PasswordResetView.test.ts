@@ -27,6 +27,10 @@ function mountView() {
     global: {
       stubs: {
         RouterLink: { template: '<a><slot /></a>' },
+        TurnstileWidget: {
+          template:
+            '<button data-turnstile-test type="button" @click="$emit(\'token\', \'widget-token\')">Turnstile</button>',
+        },
       },
     },
   });
@@ -56,10 +60,11 @@ describe('PasswordResetView', () => {
   it('shows the code and new-password step after a generic reset start', async () => {
     const wrapper = mountView();
     await wrapper.get('#email').setValue('player@example.com');
+    await wrapper.get('[data-turnstile-test]').trigger('click');
     await wrapper.get('form').trigger('submit');
     await flushPromises();
 
-    expect(startPasswordReset).toHaveBeenCalledWith('player@example.com');
+    expect(startPasswordReset).toHaveBeenCalledWith('player@example.com', 'widget-token');
     expect(wrapper.get('#verification-code').attributes()).toMatchObject({
       autocomplete: 'one-time-code',
       inputmode: 'numeric',

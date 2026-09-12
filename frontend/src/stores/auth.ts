@@ -120,7 +120,7 @@ export const useAuthStore = defineStore('auth', {
       if (!this.user) throw new Error('Not authenticated');
       return resendEmailChange(challengeId, turnstileToken);
     },
-    async completeEmailChange(challengeId: string, code: string, currentPassword?: string) {
+    async completeEmailChange(challengeId: string, code: string, currentPassword: string) {
       if (!this.user) throw new Error('Not authenticated');
       const response = await completeEmailChange(challengeId, code, currentPassword);
       this.user = response.user;

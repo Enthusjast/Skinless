@@ -551,15 +551,11 @@ export function resendEmailChange(
 export function completeEmailChange(
   challengeId: string,
   code: string,
-  currentPassword?: string,
+  currentPassword: string,
 ): Promise<{ user: ApiUser }> {
   return managementRequest<{ user: ApiUser }>('/api/user/email', {
     method: 'PUT',
-    body: JSON.stringify({
-      challengeId,
-      code,
-      ...(currentPassword ? { currentPassword } : {}),
-    }),
+    body: JSON.stringify({ challengeId, code, currentPassword }),
   });
 }
 

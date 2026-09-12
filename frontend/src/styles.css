@@ -2415,3 +2415,7 @@ td select {
     animation-iteration-count: 1 !important;
   }
 }
+.turnstile-widget {
+  min-height: 65px;
+  margin: 0.75rem 0;
+}

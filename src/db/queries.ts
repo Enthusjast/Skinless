@@ -14,6 +14,7 @@ import type {
 } from "../types";
 import {
   ACCOUNT_CHALLENGE_MAX_ATTEMPTS,
+  ACCOUNT_CHALLENGE_RESEND_DELAY_MS,
   type AccountChallengePurpose,
 } from "../utils/account";
 import type { RegistrationSettingsValues } from "../utils/registration";
@@ -561,7 +562,7 @@ export async function updateAccountChallenge(
     .prepare(
       `UPDATE account_challenges
        SET code_hash = ?, attempts = 0, last_sent_at = ?, expires_at = ?, updated_at = ?
-       WHERE id = ? AND user_id = ? AND purpose = ?`,
+       WHERE id = ? AND user_id = ? AND purpose = ? AND last_sent_at = ?`,
     )
     .bind(
       codeHash,
@@ -571,6 +572,32 @@ export async function updateAccountChallenge(
       challenge.id,
       challenge.user_id,
       challenge.purpose,
+      sentAt,
+    )
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function claimAccountChallengeResend(
+  db: D1Database,
+  challenge: Pick<AccountChallengeRecord, 'id' | 'user_id' | 'purpose'>,
+  claimedAt: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE account_challenges
+       SET last_sent_at = ?, updated_at = ?
+       WHERE id = ? AND user_id = ? AND purpose = ?
+         AND expires_at > ? AND last_sent_at <= ?`,
+    )
+    .bind(
+      claimedAt,
+      claimedAt,
+      challenge.id,
+      challenge.user_id,
+      challenge.purpose,
+      claimedAt,
+      claimedAt - ACCOUNT_CHALLENGE_RESEND_DELAY_MS,
     )
     .run();
   return (result.meta?.changes ?? 0) > 0;

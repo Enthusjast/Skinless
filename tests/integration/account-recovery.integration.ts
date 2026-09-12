@@ -136,6 +136,77 @@ describe('account recovery against real D1', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('keeps reset-resend responses generic and claims concurrent sends once', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    const email = `resend-${suffix}@example.com`;
+    await registerVerifiedAccount(email, 'correct-password', `Resend${suffix.slice(0, 8)}`);
+    const sent: SentCode[] = [];
+    const bindings = mailBindings(sent);
+
+    const start = await request('/api/auth/password/reset/start', { email }, bindings);
+    expect(start.status).toBe(202);
+    const startBody = await start.json() as { challengeId: string };
+    expect(sent).toHaveLength(1);
+
+    const unknownId = crypto.randomUUID();
+    const unknown = await request('/api/auth/password/reset/resend', {
+      challengeId: unknownId,
+    }, bindings);
+    const cooldown = await request('/api/auth/password/reset/resend', {
+      challengeId: startBody.challengeId,
+    }, bindings);
+
+    await env.DB.prepare('UPDATE account_challenges SET expires_at = ? WHERE id = ?')
+      .bind(Date.now() - 1, startBody.challengeId)
+      .run();
+    const expired = await request('/api/auth/password/reset/resend', {
+      challengeId: startBody.challengeId,
+    }, bindings);
+
+    await env.DB.prepare('UPDATE account_challenges SET last_sent_at = ?, expires_at = ? WHERE id = ?')
+      .bind(Date.now() - 61_000, Date.now() + 10 * 60_000, startBody.challengeId)
+      .run();
+    const real = await request('/api/auth/password/reset/resend', {
+      challengeId: startBody.challengeId,
+    }, bindings);
+    expect(sent).toHaveLength(2);
+
+    const responses = [unknown, cooldown, expired, real];
+    const bodies = await Promise.all(responses.map(async (response) => response.json() as Promise<{
+      message: string;
+      challengeId: string;
+      expiresAt: number;
+      resendAfter: number;
+    }>));
+    expect(responses.map((response) => response.status)).toEqual([202, 202, 202, 202]);
+    expect(new Set(bodies.map((body) => body.message))).toEqual(new Set([
+      'If an account exists for this email, a password reset code has been sent.',
+    ]));
+    for (const body of bodies) {
+      expect(Object.keys(body).sort()).toEqual(['challengeId', 'expiresAt', 'message', 'resendAfter']);
+    }
+    expect(bodies[0]?.challengeId).toBe(unknownId);
+    expect(bodies[1]?.challengeId).toBe(startBody.challengeId);
+    expect(bodies[2]?.challengeId).toBe(startBody.challengeId);
+    expect(bodies[3]?.challengeId).toBe(startBody.challengeId);
+
+    const concurrentEmail = `concurrent-${suffix}@example.com`;
+    await registerVerifiedAccount(concurrentEmail, 'correct-password', `Concurrent${suffix.slice(0, 6)}`);
+    const concurrentStart = await request('/api/auth/password/reset/start', { email: concurrentEmail }, bindings);
+    expect(concurrentStart.status).toBe(202);
+    const concurrentBody = await concurrentStart.json() as { challengeId: string };
+    await env.DB.prepare('UPDATE account_challenges SET last_sent_at = ? WHERE id = ?')
+      .bind(Date.now() - 61_000, concurrentBody.challengeId)
+      .run();
+    const sentBeforeConcurrent = sent.length;
+    const concurrentResponses = await Promise.all([
+      request('/api/auth/password/reset/resend', { challengeId: concurrentBody.challengeId }, bindings),
+      request('/api/auth/password/reset/resend', { challengeId: concurrentBody.challengeId }, bindings),
+    ]);
+    expect(concurrentResponses.map((response) => response.status)).toEqual([202, 202]);
+    expect(sent).toHaveLength(sentBeforeConcurrent + 1);
+  });
+
   it('expires reset codes, limits attempts, enforces resend cooldown, and revokes sessions and tokens', async () => {
     const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
     const email = `reset-${suffix}@example.com`;
@@ -160,8 +231,10 @@ describe('account recovery against real D1', () => {
     const tooSoon = await request('/api/auth/password/reset/resend', {
       challengeId: startBody.challengeId,
     }, bindings);
-    expect(tooSoon.status).toBe(429);
-    await expect(tooSoon.json()).resolves.toMatchObject({ errorCode: 'resend_cooldown' });
+    expect(tooSoon.status).toBe(202);
+    await expect(tooSoon.json()).resolves.toMatchObject({
+      message: 'If an account exists for this email, a password reset code has been sent.',
+    });
 
     await env.DB.prepare('UPDATE account_challenges SET last_sent_at = ? WHERE id = ?')
       .bind(Date.now() - 61_000, startBody.challengeId)
@@ -319,5 +392,114 @@ describe('account recovery against real D1', () => {
     }, bindings);
     expect(racedDuplicate.status).toBe(409);
     await expect(racedDuplicate.json()).resolves.toMatchObject({ errorCode: 'email_in_use' });
+
+    const concurrentTarget = `concurrent-${suffix}@example.com`;
+    const concurrentStart = await cookieRequest('/api/user/email/change/start', 'POST', currentSession.cookie, currentSession.csrfToken, {
+      currentPassword: password,
+      newEmail: concurrentTarget,
+    }, bindings);
+    expect(concurrentStart.status).toBe(202);
+    const concurrentBody = await concurrentStart.json() as { challengeId: string };
+    await env.DB.prepare('UPDATE account_challenges SET last_sent_at = ? WHERE id = ?')
+      .bind(Date.now() - 61_000, concurrentBody.challengeId)
+      .run();
+    const sentBeforeConcurrent = sent.length;
+    const concurrentResends = await Promise.all([
+      cookieRequest('/api/user/email/change/resend', 'POST', currentSession.cookie, currentSession.csrfToken, {
+        challengeId: concurrentBody.challengeId,
+      }, bindings),
+      cookieRequest('/api/user/email/change/resend', 'POST', currentSession.cookie, currentSession.csrfToken, {
+        challengeId: concurrentBody.challengeId,
+      }, bindings),
+    ]);
+    expect(concurrentResends.map((response) => response.status).sort()).toEqual([202, 429]);
+    expect(sent).toHaveLength(sentBeforeConcurrent + 1);
+  });
+
+  it('requires the current password and expires email challenges after five failed attempts', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    const email = `email-hardening-${suffix}@example.com`;
+    const password = 'correct-password';
+    const firstTarget = `first-${suffix}@example.com`;
+    const expiredTarget = `expired-${suffix}@example.com`;
+    const attemptsTarget = `attempts-${suffix}@example.com`;
+    await registerVerifiedAccount(email, password, `Hardening${suffix.slice(0, 7)}`);
+    const session = await webLogin(email, password);
+    const sent: SentCode[] = [];
+    const bindings = mailBindings(sent);
+
+    const firstStart = await cookieRequest('/api/user/email/change/start', 'POST', session.cookie, session.csrfToken, {
+      currentPassword: password,
+      newEmail: firstTarget,
+    }, bindings);
+    expect(firstStart.status).toBe(202);
+    const firstBody = await firstStart.json() as { challengeId: string };
+
+    const missingCurrentPassword = await cookieRequest('/api/user/email', 'PUT', session.cookie, session.csrfToken, {
+      challengeId: firstBody.challengeId,
+      code: sent[0]?.code,
+    }, bindings);
+    expect(missingCurrentPassword.status).toBe(400);
+    await expect(missingCurrentPassword.json()).resolves.toMatchObject({
+      errorCode: 'current_password_required',
+    });
+
+    const wrongCurrentPassword = await cookieRequest('/api/user/email', 'PUT', session.cookie, session.csrfToken, {
+      challengeId: firstBody.challengeId,
+      code: sent[0]?.code,
+      currentPassword: 'wrong-password',
+    }, bindings);
+    expect(wrongCurrentPassword.status).toBe(403);
+    await expect(wrongCurrentPassword.json()).resolves.toMatchObject({
+      errorCode: 'current_password_incorrect',
+    });
+
+    const firstComplete = await cookieRequest('/api/user/email', 'PUT', session.cookie, session.csrfToken, {
+      challengeId: firstBody.challengeId,
+      code: sent[0]?.code,
+      currentPassword: password,
+    }, bindings);
+    expect(firstComplete.status).toBe(200);
+
+    const expiredStart = await cookieRequest('/api/user/email/change/start', 'POST', session.cookie, session.csrfToken, {
+      currentPassword: password,
+      newEmail: expiredTarget,
+    }, bindings);
+    expect(expiredStart.status).toBe(202);
+    const expiredBody = await expiredStart.json() as { challengeId: string };
+    await env.DB.prepare('UPDATE account_challenges SET expires_at = ? WHERE id = ?')
+      .bind(Date.now() - 1, expiredBody.challengeId)
+      .run();
+    const expiredComplete = await cookieRequest('/api/user/email', 'PUT', session.cookie, session.csrfToken, {
+      challengeId: expiredBody.challengeId,
+      code: sent[1]?.code,
+      currentPassword: password,
+    }, bindings);
+    expect(expiredComplete.status).toBe(400);
+    await expect(expiredComplete.json()).resolves.toMatchObject({ errorCode: 'invalid_verification_code' });
+
+    const attemptsStart = await cookieRequest('/api/user/email/change/start', 'POST', session.cookie, session.csrfToken, {
+      currentPassword: password,
+      newEmail: attemptsTarget,
+    }, bindings);
+    expect(attemptsStart.status).toBe(202);
+    const attemptsBody = await attemptsStart.json() as { challengeId: string };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const wrong = await cookieRequest('/api/user/email', 'PUT', session.cookie, session.csrfToken, {
+        challengeId: attemptsBody.challengeId,
+        code: '000000',
+        currentPassword: password,
+      }, bindings);
+      expect(wrong.status).toBe(400);
+    }
+    const exhausted = await cookieRequest('/api/user/email', 'PUT', session.cookie, session.csrfToken, {
+      challengeId: attemptsBody.challengeId,
+      code: sent[2]?.code,
+      currentPassword: password,
+    }, bindings);
+    expect(exhausted.status).toBe(429);
+    await expect(exhausted.json()).resolves.toMatchObject({
+      errorCode: 'verification_attempts_exhausted',
+    });
   });
 });

@@ -40,13 +40,27 @@ afterEach(() => {
 
 describe('EmailChangeForm', () => {
   it('verifies the new email and shows success after the code is accepted', async () => {
-    const wrapper = mount(EmailChangeForm);
+    const wrapper = mount(EmailChangeForm, {
+      global: {
+        stubs: {
+          TurnstileWidget: {
+            template:
+              '<button data-turnstile-test type="button" @click="$emit(\'token\', \'widget-token\')">Turnstile</button>',
+          },
+        },
+      },
+    });
     await wrapper.get('#email-current-password').setValue('correct-password');
     await wrapper.get('#new-email').setValue('new@example.com');
+    await wrapper.get('[data-turnstile-test]').trigger('click');
     await wrapper.get('form').trigger('submit');
     await flushPromises();
 
-    expect(startEmailChange).toHaveBeenCalledWith('correct-password', 'new@example.com');
+    expect(startEmailChange).toHaveBeenCalledWith(
+      'correct-password',
+      'new@example.com',
+      'widget-token',
+    );
     expect(wrapper.get('#email-change-code')).toBeTruthy();
     const resend = wrapper.findAll('button').find((button) => button.text().includes('秒后可重发'));
     expect((resend?.element as HTMLButtonElement | undefined)?.disabled).toBe(true);
