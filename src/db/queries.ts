@@ -700,25 +700,20 @@ export async function retryTextureCleanup(
   db: D1Database,
   cleanup: TextureCleanupRow,
   error: string,
-): Promise<void> {
-  await db
+  nextScheduledAt: number,
+): Promise<boolean> {
+  const result = await db
     .prepare(
-      `INSERT INTO texture_cleanup (hash, object_key, scheduled_at, attempts, last_error)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT (hash) DO UPDATE SET
-         object_key = excluded.object_key,
-         scheduled_at = excluded.scheduled_at,
-         attempts = excluded.attempts,
-         last_error = excluded.last_error`,
+      `UPDATE texture_cleanup
+       SET scheduled_at = ?,
+           attempts = attempts + 1,
+           last_error = ?
+       WHERE hash = ?
+         AND scheduled_at = ?`,
     )
-    .bind(
-      cleanup.hash,
-      cleanup.object_key,
-      cleanup.scheduled_at,
-      cleanup.attempts + 1,
-      error,
-    )
+    .bind(nextScheduledAt, error, cleanup.hash, cleanup.scheduled_at)
     .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function countAssetReferences(db: D1Database, hash: string): Promise<number> {

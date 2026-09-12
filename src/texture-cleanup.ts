@@ -161,7 +161,7 @@ export async function processTextureCleanup(
       stats.deleted += 1;
     } catch (error) {
       const message = cleanupError(error);
-      await retryTextureCleanup(db, cleanup, message);
+      await retryTextureCleanup(db, cleanup, message, now + TEXTURE_CLEANUP_DELAY_MS);
       stats.failed += 1;
       console.error('[texture-cleanup] deletion failed', {
         attempts: cleanup.attempts + 1,

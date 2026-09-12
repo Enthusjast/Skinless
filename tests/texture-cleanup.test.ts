@@ -55,7 +55,6 @@ class CleanupDatabase {
       const row = this.cleanups.get(hash);
       const referenced = (this.profileReferences.get(hash) ?? 0) + (this.wardrobeReferences.get(hash) ?? 0) > 0;
       if (!row || row.scheduled_at > Number(values[1]) || referenced) return null;
-      this.cleanups.delete(hash);
       return { ...row };
     }
     return null;
@@ -75,16 +74,13 @@ class CleanupDatabase {
   }
 
   run(sql: string, values: unknown[]): number {
-    if (sql.startsWith('INSERT INTO texture_cleanup') && sql.includes('ON CONFLICT (hash) DO UPDATE SET')) {
-      const [hashValue, objectKeyValue, scheduledAtValue, attemptsValue, errorValue] = values;
-      const hash = String(hashValue);
-      this.cleanups.set(hash, {
-        hash,
-        object_key: String(objectKeyValue),
-        scheduled_at: Number(scheduledAtValue),
-        attempts: Number(attemptsValue),
-        last_error: String(errorValue),
-      });
+    if (sql.startsWith('UPDATE texture_cleanup SET scheduled_at = ?')) {
+      const [nextScheduledAt, error, hashValue, scheduledAtValue] = values;
+      const row = this.cleanups.get(String(hashValue));
+      if (!row || row.scheduled_at !== Number(scheduledAtValue)) return 0;
+      row.scheduled_at = Number(nextScheduledAt);
+      row.attempts += 1;
+      row.last_error = String(error);
       return 1;
     }
     if (sql.startsWith('DELETE FROM texture_cleanup WHERE hash = ? AND NOT EXISTS')) {
@@ -130,11 +126,14 @@ class CleanupBucket {
   public getCalls = 0;
   public fail = false;
   public failPut = false;
+  public failAfterDelete = false;
+  public onGet: ((key: string) => void) | undefined;
   public onDelete: ((key: string) => void) | undefined;
 
   async get(key: string): Promise<R2ObjectBody | null> {
     this.getCalls += 1;
     const bytes = this.files.get(key);
+    this.onGet?.(key);
     if (!bytes) return null;
     return {
       arrayBuffer: async () => bytes.slice().buffer,
@@ -152,6 +151,7 @@ class CleanupBucket {
     this.deleted.push(key);
     this.files.delete(key);
     this.onDelete?.(key);
+    if (this.failAfterDelete) throw new Error('Worker crashed before cleanup completion');
   }
 }
 
@@ -173,6 +173,41 @@ describe('deferred texture cleanup', () => {
       attempts: 0,
       last_error: null,
     });
+  });
+
+  it('retains the cleanup row when a worker fails after deleting R2 before completion', async () => {
+    const db = database();
+    const bucket = new CleanupBucket();
+    const now = 6_500_000;
+    const hash = 'hash-crash-before-completion';
+    const dueAt = now + TEXTURE_CLEANUP_DELAY_MS;
+    bucket.files.set(`${hash}.png`, Uint8Array.from([13, 14, 15, 16]));
+    bucket.failAfterDelete = true;
+    await scheduleTextureCleanup(db as unknown as D1Database, hash, now);
+
+    const failed = await processTextureCleanup(
+      db as unknown as D1Database,
+      bucket as unknown as R2Bucket,
+      dueAt,
+    );
+
+    expect(failed).toMatchObject({ processed: 1, deleted: 0, cancelled: 0, failed: 1 });
+    expect(bucket.deleted).toEqual([`${hash}.png`]);
+    expect(db.cleanups.get(hash)).toMatchObject({
+      scheduled_at: dueAt + TEXTURE_CLEANUP_DELAY_MS,
+      attempts: 1,
+      last_error: 'Worker crashed before cleanup completion',
+    });
+
+    bucket.failAfterDelete = false;
+    const retry = await processTextureCleanup(
+      db as unknown as D1Database,
+      bucket as unknown as R2Bucket,
+      dueAt + TEXTURE_CLEANUP_DELAY_MS,
+    );
+
+    expect(retry).toMatchObject({ processed: 1, deleted: 1, cancelled: 0, failed: 0 });
+    expect(db.cleanups.has(hash)).toBe(false);
   });
 
   it('cancels pending cleanup when a hash becomes referenced again', async () => {
@@ -228,10 +263,46 @@ describe('deferred texture cleanup', () => {
     expect(bucket.deleted).toEqual([]);
 
     bucket.fail = false;
-    await processTextureCleanup(db as unknown as D1Database, bucket as unknown as R2Bucket, now + TEXTURE_CLEANUP_DELAY_MS + 1);
+    await processTextureCleanup(db as unknown as D1Database, bucket as unknown as R2Bucket, now + TEXTURE_CLEANUP_DELAY_MS * 2);
 
     expect(bucket.deleted).toEqual(['hash-e.png']);
     expect(db.cleanups.has('hash-e')).toBe(false);
+  });
+
+  it('does not resurrect a rescheduled cleanup after a stale worker failure', async () => {
+    const db = database();
+    const bucket = new CleanupBucket();
+    const now = 5_500_000;
+    const hash = 'hash-stale-retry';
+    const rescheduledNow = now + 1_234;
+    await scheduleTextureCleanup(db as unknown as D1Database, hash, now);
+    bucket.fail = true;
+    bucket.onGet = () => {
+      db.cleanups.delete(hash);
+      db.cleanups.set(hash, {
+        hash,
+        object_key: `${hash}.png`,
+        scheduled_at: rescheduledNow + TEXTURE_CLEANUP_DELAY_MS,
+        attempts: 0,
+        last_error: null,
+      });
+      bucket.onGet = undefined;
+    };
+
+    const stats = await processTextureCleanup(
+      db as unknown as D1Database,
+      bucket as unknown as R2Bucket,
+      now + TEXTURE_CLEANUP_DELAY_MS,
+    );
+
+    expect(stats).toMatchObject({ processed: 1, deleted: 0, cancelled: 0, failed: 1 });
+    expect(db.cleanups.get(hash)).toEqual({
+      hash,
+      object_key: `${hash}.png`,
+      scheduled_at: rescheduledNow + TEXTURE_CLEANUP_DELAY_MS,
+      attempts: 0,
+      last_error: null,
+    });
   });
 
   it('removes a due queue row without deleting while the hash is referenced', async () => {
@@ -292,7 +363,7 @@ describe('deferred texture cleanup', () => {
     const retry = await processTextureCleanup(
       db as unknown as D1Database,
       bucket as unknown as R2Bucket,
-      now + TEXTURE_CLEANUP_DELAY_MS + 1,
+      now + TEXTURE_CLEANUP_DELAY_MS * 2,
     );
 
     expect(retry).toMatchObject({ processed: 1, deleted: 0, cancelled: 1, failed: 0 });
