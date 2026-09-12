@@ -1,4 +1,5 @@
 const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').trim();
+// An empty base URL intentionally keeps browser requests on the current origin.
 export const API_BASE_URL = configuredBaseUrl.replace(/\/+$/, '');
 
 export interface ApiProfile {

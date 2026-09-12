@@ -28,11 +28,13 @@ pnpm dev
 pnpm frontend:dev
 ```
 
-Vite 会把 `/api`、`/authserver`、`/sessionserver` 和 `/textures` 代理到本地 Worker。前端部署到独立 Pages 项目时，设置 `frontend/.env`：
+Vite 会把 `/api`、`/authserver`、`/sessionserver` 和 `/textures` 代理到本地 Worker。前端默认使用当前站点的同源 API 路径；本地或同源部署无需设置 API base URL：
 
 ```dotenv
-VITE_API_BASE_URL=https://skin.example.com
+VITE_API_BASE_URL=
 ```
+
+如果 API 部署在外部 origin，必须显式配置绝对 URL，并同步修改 Pages CSP 的 `connect-src`/`img-src`、路由和 CORS；默认 `_headers` 只允许同源请求。
 
 ## 验证命令
 
@@ -78,7 +80,7 @@ pnpm exec wrangler deploy --dry-run
    wrangler deploy
    ```
 
-4. 在 Cloudflare Pages 创建前端项目，构建命令使用 `pnpm --filter @skinless/frontend build`，输出目录为 `frontend/dist`，并配置 `VITE_API_BASE_URL`。
+4. 在 Cloudflare Pages 创建前端项目，构建命令使用 `pnpm --filter @skinless/frontend build`，输出目录为 `frontend/dist`。同源部署保持 `VITE_API_BASE_URL` 为空；如果 API 使用外部 origin，必须显式更新 Pages CSP 的 `connect-src`/`img-src`、路由和 CORS 后再配置绝对 URL。
 
 5. 注册首个账号后，用 D1 手动提升管理员角色：
 

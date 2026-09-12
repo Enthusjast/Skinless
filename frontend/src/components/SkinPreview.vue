@@ -8,18 +8,13 @@ const props = defineProps<{
 }>();
 
 const scale = 6;
+const textureSize = 64;
 const textureUrl = computed(() =>
   props.skinHash ? `${API_BASE_URL}/textures/${props.skinHash}` : '',
 );
 
-function partStyle(x: number, y: number, width: number, height: number) {
-  return {
-    width: `${width * scale}px`,
-    height: `${height * scale}px`,
-    backgroundImage: `url(${textureUrl.value})`,
-    backgroundSize: `${64 * scale}px ${64 * scale}px`,
-    backgroundPosition: `-${x * scale}px -${y * scale}px`,
-  };
+function textureViewBox(x: number, y: number, width: number, height: number) {
+  return `${x} ${y} ${width} ${height}`;
 }
 </script>
 
@@ -35,22 +30,100 @@ function partStyle(x: number, y: number, width: number, height: number) {
     </div>
     <div v-if="skinHash" class="skin-stage" aria-label="皮肤 2D 预览">
       <div class="skin-row skin-head-row">
-        <div class="texture-part skin-head" :style="partStyle(8, 8, 8, 8)" />
+        <svg
+          class="texture-part skin-head"
+          :width="8 * scale"
+          :height="8 * scale"
+          :viewBox="textureViewBox(8, 8, 8, 8)"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <image
+            :href="textureUrl"
+            :width="textureSize"
+            :height="textureSize"
+            preserveAspectRatio="none"
+          />
+        </svg>
       </div>
       <div class="skin-row skin-body-row">
-        <div
+        <svg
           class="texture-part skin-limb"
-          :style="partStyle(44, 20, model === 'slim' ? 3 : 4, 12)"
-        />
-        <div class="texture-part skin-body" :style="partStyle(20, 20, 8, 12)" />
-        <div
+          :width="(model === 'slim' ? 3 : 4) * scale"
+          :height="12 * scale"
+          :viewBox="textureViewBox(44, 20, model === 'slim' ? 3 : 4, 12)"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <image
+            :href="textureUrl"
+            :width="textureSize"
+            :height="textureSize"
+            preserveAspectRatio="none"
+          />
+        </svg>
+        <svg
+          class="texture-part skin-body"
+          :width="8 * scale"
+          :height="12 * scale"
+          :viewBox="textureViewBox(20, 20, 8, 12)"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <image
+            :href="textureUrl"
+            :width="textureSize"
+            :height="textureSize"
+            preserveAspectRatio="none"
+          />
+        </svg>
+        <svg
           class="texture-part skin-limb"
-          :style="partStyle(36, 52, model === 'slim' ? 3 : 4, 12)"
-        />
+          :width="(model === 'slim' ? 3 : 4) * scale"
+          :height="12 * scale"
+          :viewBox="textureViewBox(36, 52, model === 'slim' ? 3 : 4, 12)"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <image
+            :href="textureUrl"
+            :width="textureSize"
+            :height="textureSize"
+            preserveAspectRatio="none"
+          />
+        </svg>
       </div>
       <div class="skin-row skin-legs-row">
-        <div class="texture-part skin-leg" :style="partStyle(4, 20, 4, 12)" />
-        <div class="texture-part skin-leg" :style="partStyle(20, 52, 4, 12)" />
+        <svg
+          class="texture-part skin-leg"
+          :width="4 * scale"
+          :height="12 * scale"
+          :viewBox="textureViewBox(4, 20, 4, 12)"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <image
+            :href="textureUrl"
+            :width="textureSize"
+            :height="textureSize"
+            preserveAspectRatio="none"
+          />
+        </svg>
+        <svg
+          class="texture-part skin-leg"
+          :width="4 * scale"
+          :height="12 * scale"
+          :viewBox="textureViewBox(20, 52, 4, 12)"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <image
+            :href="textureUrl"
+            :width="textureSize"
+            :height="textureSize"
+            preserveAspectRatio="none"
+          />
+        </svg>
       </div>
     </div>
     <div v-else class="preview-empty">
