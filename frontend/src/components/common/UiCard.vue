@@ -1,11 +1,14 @@
 <script setup lang="ts">
-withDefaults(defineProps<{
-  hoverable?: boolean;
-  as?: 'article' | 'section' | 'div';
-}>(), {
-  hoverable: false,
-  as: 'article',
-});
+withDefaults(
+  defineProps<{
+    hoverable?: boolean;
+    as?: 'article' | 'section' | 'div';
+  }>(),
+  {
+    hoverable: false,
+    as: 'article',
+  },
+);
 </script>
 
 <template>

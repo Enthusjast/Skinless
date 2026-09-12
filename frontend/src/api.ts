@@ -24,10 +24,13 @@ export interface AuthResponse {
   selectedProfile: { id: string; name: string };
 }
 
-export interface AdminUser extends ApiUser {}
+export type AdminUser = ApiUser;
 
 export class ApiError extends Error {
-  public constructor(public readonly status: number, message: string) {
+  public constructor(
+    public readonly status: number,
+    message: string,
+  ) {
     super(message);
     this.name = 'ApiError';
   }
@@ -55,15 +58,23 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
     body = null;
   }
   if (!response.ok) {
-    const message = typeof body === 'object' && body !== null && 'errorMessage' in body && typeof body.errorMessage === 'string'
-      ? body.errorMessage
-      : `Request failed with status ${response.status}.`;
+    const message =
+      typeof body === 'object' &&
+      body !== null &&
+      'errorMessage' in body &&
+      typeof body.errorMessage === 'string'
+        ? body.errorMessage
+        : `Request failed with status ${response.status}.`;
     throw new ApiError(response.status, message);
   }
   return body as T;
 }
 
-export function authenticate(email: string, password: string, clientToken: string): Promise<AuthResponse> {
+export function authenticate(
+  email: string,
+  password: string,
+  clientToken: string,
+): Promise<AuthResponse> {
   return request<AuthResponse>('/authserver/authenticate', {
     method: 'POST',
     body: JSON.stringify({ username: email, password, clientToken, requestUser: true }),
@@ -77,7 +88,11 @@ export function invalidate(accessToken: string, clientToken: string): Promise<vo
   });
 }
 
-export function register(email: string, password: string, name: string): Promise<{ user: ApiUser }> {
+export function register(
+  email: string,
+  password: string,
+  name: string,
+): Promise<{ user: ApiUser }> {
   return request<{ user: ApiUser }>('/api/register', {
     method: 'POST',
     body: JSON.stringify({ email, password, name }),
@@ -88,19 +103,37 @@ export function getUserProfile(token: string): Promise<{ user: ApiUser }> {
   return request<{ user: ApiUser }>('/api/user/profile', {}, token);
 }
 
-export function changePassword(token: string, currentPassword: string, newPassword: string): Promise<void> {
-  return request<void>('/api/user/password', {
-    method: 'PUT',
-    body: JSON.stringify({ currentPassword, newPassword }),
-  }, token);
+export function changePassword(
+  token: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  return request<void>(
+    '/api/user/password',
+    {
+      method: 'PUT',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    },
+    token,
+  );
 }
 
-export function uploadAsset(token: string, asset: 'skin' | 'cape', file: Blob, model: 'classic' | 'slim', clientHash?: string): Promise<{ hash: string; profile: ApiProfile }> {
+export function uploadAsset(
+  token: string,
+  asset: 'skin' | 'cape',
+  file: Blob,
+  model: 'classic' | 'slim',
+  clientHash?: string,
+): Promise<{ hash: string; profile: ApiProfile }> {
   const form = new FormData();
   form.set('file', file, `${asset}.png`);
   if (asset === 'skin') form.set('skin_model', model);
   if (clientHash) form.set('sha256', clientHash);
-  return request<{ hash: string; profile: ApiProfile }>(`/api/user/${asset}`, { method: 'POST', body: form }, token);
+  return request<{ hash: string; profile: ApiProfile }>(
+    `/api/user/${asset}`,
+    { method: 'POST', body: form },
+    token,
+  );
 }
 
 export function deleteAsset(token: string, asset: 'skin' | 'cape'): Promise<void> {
@@ -111,9 +144,17 @@ export function getAdminUsers(token: string): Promise<{ users: AdminUser[] }> {
   return request<{ users: AdminUser[] }>('/api/admin/users', {}, token);
 }
 
-export function updateUserRole(token: string, userId: string, role: 'user' | 'admin'): Promise<void> {
-  return request<void>(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
-    method: 'PUT',
-    body: JSON.stringify({ role }),
-  }, token);
+export function updateUserRole(
+  token: string,
+  userId: string,
+  role: 'user' | 'admin',
+): Promise<void> {
+  return request<void>(
+    `/api/admin/users/${encodeURIComponent(userId)}/role`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    },
+    token,
+  );
 }

@@ -11,17 +11,28 @@ const route = useRoute();
 const form = reactive({ email: '', password: '' });
 const error = ref('');
 const showPassword = ref(false);
-const notice = ref(route.query.changed === '1' ? '密码已更新，请使用新密码登录。' : route.query.registered === '1' ? '账号创建成功，现在可以登录了。' : '');
+const notice = ref(
+  route.query.changed === '1'
+    ? '密码已更新，请使用新密码登录。'
+    : route.query.registered === '1'
+      ? '账号创建成功，现在可以登录了。'
+      : '',
+);
 
 async function submit() {
   error.value = '';
   try {
     await auth.login(form.email, form.password);
-    const candidate = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard';
-    const redirect = candidate.startsWith('/') && !candidate.startsWith('//') ? candidate : '/dashboard';
+    const candidate =
+      typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard';
+    const redirect =
+      candidate.startsWith('/') && !candidate.startsWith('//') ? candidate : '/dashboard';
     await router.push(redirect);
   } catch (cause) {
-    error.value = cause instanceof ApiError || cause instanceof Error ? cause.message : '登录失败，请稍后重试。';
+    error.value =
+      cause instanceof ApiError || cause instanceof Error
+        ? cause.message
+        : '登录失败，请稍后重试。';
   }
 }
 </script>
@@ -32,7 +43,10 @@ async function submit() {
       <p class="eyebrow">WELCOME BACK</p>
       <h1>登录 Minecraft 身份</h1>
       <p>使用账号登录外置认证服务，管理当前角色和纹理。</p>
-      <div class="auth-perks"><span><ShieldCheck :size="18" aria-hidden="true" />安全的 Bearer token</span><span><Sparkles :size="18" aria-hidden="true" />全球边缘低延迟</span></div>
+      <div class="auth-perks">
+        <span><ShieldCheck :size="18" aria-hidden="true" />安全的 Bearer token</span
+        ><span><Sparkles :size="18" aria-hidden="true" />全球边缘低延迟</span>
+      </div>
       <div class="auth-visual" aria-hidden="true"><span v-for="index in 24" :key="index" /></div>
     </div>
     <section class="auth-card">
@@ -40,11 +54,46 @@ async function submit() {
       <h2>登录账号</h2>
       <p>使用注册邮箱连接你的 Minecraft 身份。</p>
       <form @submit.prevent="submit">
-        <div class="field"><label for="email">邮箱地址</label><input id="email" v-model="form.email" type="email" autocomplete="email" placeholder="you@example.com" required /></div>
-        <div class="field"><label for="password">密码</label><div class="password-field"><input id="password" v-model="form.password" :type="showPassword ? 'text' : 'password'" autocomplete="current-password" placeholder="输入密码" required /><button class="icon-button password-toggle" type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="17" aria-hidden="true" /><Eye v-else :size="17" aria-hidden="true" /></button></div></div>
+        <div class="field">
+          <label for="email">邮箱地址</label
+          ><input
+            id="email"
+            v-model="form.email"
+            type="email"
+            autocomplete="email"
+            placeholder="you@example.com"
+            required
+          />
+        </div>
+        <div class="field">
+          <label for="password">密码</label>
+          <div class="password-field">
+            <input
+              id="password"
+              v-model="form.password"
+              :type="showPassword ? 'text' : 'password'"
+              autocomplete="current-password"
+              placeholder="输入密码"
+              required
+            /><button
+              class="icon-button password-toggle"
+              type="button"
+              :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+              @click="showPassword = !showPassword"
+            >
+              <EyeOff v-if="showPassword" :size="17" aria-hidden="true" /><Eye
+                v-else
+                :size="17"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </div>
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         <p v-if="notice" class="form-success" role="status">{{ notice }}</p>
-        <button class="button button-primary" type="submit" :disabled="auth.loading"><LockKeyhole :size="17" aria-hidden="true" />{{ auth.loading ? '登录中…' : '登录' }}</button>
+        <button class="button button-primary" type="submit" :disabled="auth.loading">
+          <LockKeyhole :size="17" aria-hidden="true" />{{ auth.loading ? '登录中…' : '登录' }}
+        </button>
       </form>
       <RouterLink to="/register" class="auth-link">还没有账号？立即注册</RouterLink>
     </section>

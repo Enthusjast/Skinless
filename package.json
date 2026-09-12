@@ -6,8 +6,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "build": "pnpm --filter @skinless/frontend build",
+    "lint": "pnpm --filter @skinless/frontend lint",
+    "format:check": "pnpm --filter @skinless/frontend format:check",
     "typecheck": "tsc --noEmit && pnpm --filter @skinless/frontend typecheck",
     "test": "vitest run",
+    "test:frontend": "pnpm --filter @skinless/frontend test",
+    "test:frontend:coverage": "pnpm --filter @skinless/frontend test:coverage",
     "test:watch": "vitest",
     "db:local": "wrangler d1 execute mc-skin-db --local --file=./migrations/0001_init.sql",
     "frontend:dev": "pnpm --filter @skinless/frontend dev",

@@ -20,8 +20,26 @@ const router = createRouter({
       component: WorkspaceLayout,
       meta: { requiresAuth: true },
       children: [
-        { path: 'dashboard', component: () => import('./views/DashboardView.vue'), meta: { title: '仪表盘', eyebrow: 'PLAYER DASHBOARD', description: '管理你的游戏身份、纹理资产和账户安全。' } },
-        { path: 'admin', component: () => import('./views/AdminView.vue'), meta: { requiresAuth: true, requiresAdmin: true, title: '用户管理', eyebrow: 'ADMINISTRATION', description: '查看账号并调整基础角色权限。' } },
+        {
+          path: 'dashboard',
+          component: () => import('./views/DashboardView.vue'),
+          meta: {
+            title: '仪表盘',
+            eyebrow: 'PLAYER DASHBOARD',
+            description: '管理你的游戏身份、纹理资产和账户安全。',
+          },
+        },
+        {
+          path: 'admin',
+          component: () => import('./views/AdminView.vue'),
+          meta: {
+            requiresAuth: true,
+            requiresAdmin: true,
+            title: '用户管理',
+            eyebrow: 'ADMINISTRATION',
+            description: '查看账号并调整基础角色权限。',
+          },
+        },
       ],
     },
   ],
@@ -34,7 +52,8 @@ router.beforeEach(async (to) => {
     return { path: '/login', query: { redirect: to.fullPath } };
   }
   if (to.meta.requiresAdmin && !auth.isAdmin) return '/dashboard';
-  if ((to.path === '/login' || to.path === '/register') && auth.isAuthenticated) return '/dashboard';
+  if ((to.path === '/login' || to.path === '/register') && auth.isAuthenticated)
+    return '/dashboard';
   return true;
 });
 

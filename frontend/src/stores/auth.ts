@@ -38,7 +38,13 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     persist() {
       if (!this.token || !this.clientToken) return;
-      localStorage.setItem(SESSION_KEY, JSON.stringify({ token: this.token, clientToken: this.clientToken } satisfies StoredSession));
+      localStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          token: this.token,
+          clientToken: this.clientToken,
+        } satisfies StoredSession),
+      );
     },
     clearSession() {
       this.token = null;
@@ -97,7 +103,12 @@ export const useAuthStore = defineStore('auth', {
       await changePassword(this.token, currentPassword, newPassword);
       this.clearSession();
     },
-    async upload(asset: 'skin' | 'cape', file: Blob, model: 'classic' | 'slim', clientHash?: string) {
+    async upload(
+      asset: 'skin' | 'cape',
+      file: Blob,
+      model: 'classic' | 'slim',
+      clientHash?: string,
+    ) {
       if (!this.token || !this.user) throw new Error('Not authenticated');
       const result = await uploadAsset(this.token, asset, file, model, clientHash);
       this.user.profile = result.profile;

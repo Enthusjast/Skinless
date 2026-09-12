@@ -75,7 +75,10 @@ function resizeTexture(file: File): Promise<Blob> {
       context.clearRect(0, 0, targetWidth, targetHeight);
       context.drawImage(image, 0, 0, targetWidth, targetHeight);
       URL.revokeObjectURL(objectUrl);
-      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('无法生成 PNG。')), 'image/png');
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('无法生成 PNG。'))),
+        'image/png',
+      );
     };
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
@@ -103,7 +106,10 @@ async function upload() {
     clearSelection();
     success.value = '已上传并保存。';
   } catch (cause) {
-    error.value = cause instanceof ApiError || cause instanceof Error ? cause.message : '上传失败，请稍后重试。';
+    error.value =
+      cause instanceof ApiError || cause instanceof Error
+        ? cause.message
+        : '上传失败，请稍后重试。';
   } finally {
     busy.value = false;
   }
@@ -130,19 +136,80 @@ onUnmounted(releasePreview);
 <template>
   <UiCard as="article" class="upload-card">
     <div class="upload-card-header">
-      <div><p class="eyebrow">{{ asset === 'skin' ? 'CHARACTER TEXTURE' : 'OPTIONAL ACCESSORY' }}</p><h3>{{ asset === 'skin' ? '皮肤' : '披风' }}</h3></div>
-      <span class="upload-status" :class="{ 'is-ready': currentHash }">{{ currentHash ? '已设置' : '未设置' }}</span>
+      <div>
+        <p class="eyebrow">{{ asset === 'skin' ? 'CHARACTER TEXTURE' : 'OPTIONAL ACCESSORY' }}</p>
+        <h3>{{ asset === 'skin' ? '皮肤' : '披风' }}</h3>
+      </div>
+      <span class="upload-status" :class="{ 'is-ready': currentHash }">{{
+        currentHash ? '已设置' : '未设置'
+      }}</span>
     </div>
-    <p class="upload-help">{{ asset === 'skin' ? '支持任意图片，浏览器会处理为 64 × 64 PNG。' : '支持任意图片，浏览器会处理为 64 × 32 PNG。' }}</p>
-    <input ref="fileInput" class="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" @change="onFileChange" />
-    <button class="dropzone" :class="{ dragging, 'has-file': selectedFile }" type="button" :disabled="busy" @click="chooseFile" @dragenter.prevent="dragging = true" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="onDrop">
-      <span class="dropzone-icon"><img v-if="previewUrl" :src="previewUrl" alt="" class="upload-thumb" /><Check v-else-if="selectedFile" :size="20" aria-hidden="true" /><UploadCloud v-else :size="20" aria-hidden="true" /></span>
-      <span><strong>{{ selectedFile ? selectedFile.name : '拖拽图片到这里' }}</strong><small>{{ selectedFile ? '已准备好，点击上传保存' : '或点击选择 PNG / JPG / WebP' }}</small></span>
+    <p class="upload-help">
+      {{
+        asset === 'skin'
+          ? '支持任意图片，浏览器会处理为 64 × 64 PNG。'
+          : '支持任意图片，浏览器会处理为 64 × 32 PNG。'
+      }}
+    </p>
+    <input
+      ref="fileInput"
+      class="visually-hidden"
+      type="file"
+      accept="image/png,image/jpeg,image/webp"
+      @change="onFileChange"
+    />
+    <button
+      class="dropzone"
+      :class="{ dragging, 'has-file': selectedFile }"
+      type="button"
+      :disabled="busy"
+      @click="chooseFile"
+      @dragenter.prevent="dragging = true"
+      @dragover.prevent="dragging = true"
+      @dragleave.prevent="dragging = false"
+      @drop.prevent="onDrop"
+    >
+      <span class="dropzone-icon"
+        ><img v-if="previewUrl" :src="previewUrl" alt="" class="upload-thumb" /><Check
+          v-else-if="selectedFile"
+          :size="20"
+          aria-hidden="true" /><UploadCloud v-else :size="20" aria-hidden="true"
+      /></span>
+      <span
+        ><strong>{{ selectedFile ? selectedFile.name : '拖拽图片到这里' }}</strong
+        ><small>{{
+          selectedFile ? '已准备好，点击上传保存' : '或点击选择 PNG / JPG / WebP'
+        }}</small></span
+      >
     </button>
     <div class="upload-actions">
-      <button v-if="selectedFile" class="button button-primary button-small" type="button" :disabled="busy" @click="upload"><FileImage :size="16" aria-hidden="true" />{{ busy ? '处理中…' : '处理并上传' }}</button>
-      <button v-if="selectedFile" class="text-button" type="button" :disabled="busy" @click="clearSelection"><X :size="15" aria-hidden="true" />清除选择</button>
-      <button v-if="currentHash" class="text-button danger" type="button" :disabled="busy" @click="remove">移除</button>
+      <button
+        v-if="selectedFile"
+        class="button button-primary button-small"
+        type="button"
+        :disabled="busy"
+        @click="upload"
+      >
+        <FileImage :size="16" aria-hidden="true" />{{ busy ? '处理中…' : '处理并上传' }}
+      </button>
+      <button
+        v-if="selectedFile"
+        class="text-button"
+        type="button"
+        :disabled="busy"
+        @click="clearSelection"
+      >
+        <X :size="15" aria-hidden="true" />清除选择
+      </button>
+      <button
+        v-if="currentHash"
+        class="text-button danger"
+        type="button"
+        :disabled="busy"
+        @click="remove"
+      >
+        移除
+      </button>
     </div>
     <p v-if="selectedFile" class="file-name">{{ selectedFile.name }}</p>
     <p v-if="success" class="form-success" role="status">{{ success }}</p>
