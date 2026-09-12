@@ -11,7 +11,10 @@ export default defineWorkersConfig(async () => {
         workers: {
           wrangler: { configPath: './wrangler.toml' },
           miniflare: {
-            bindings: { TEST_MIGRATIONS: migrations },
+            bindings: {
+              TEST_MIGRATIONS: migrations,
+              WEB_SESSION_SECRET: 'integration-web-session-secret',
+            },
           },
         },
       },

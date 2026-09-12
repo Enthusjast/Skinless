@@ -5,6 +5,7 @@ import type {
   UserRole,
   UserWithProfile,
   SkinModel,
+  WebSessionRecord,
 } from '../types';
 
 export interface TokenContextRow extends TokenRecord {
@@ -26,6 +27,13 @@ export interface ServerSessionRecord {
   user_id: string;
   created_at: number;
   expires_at: number;
+}
+
+export interface WebSessionSummary {
+  id: string;
+  device_label: string;
+  created_at: number;
+  last_used_at: number;
 }
 
 export async function findUserByEmail(db: D1Database, email: string): Promise<UserRecord | null> {
@@ -133,6 +141,89 @@ export async function deleteToken(db: D1Database, accessToken: string): Promise<
 
 export async function deleteUserTokens(db: D1Database, userId: string): Promise<void> {
   await db.prepare('DELETE FROM tokens WHERE user_id = ?').bind(userId).run();
+}
+
+export async function insertWebSession(db: D1Database, session: WebSessionRecord): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO web_sessions
+       (id, user_id, refresh_token_hash, csrf_token_hash, device_label, created_at, last_used_at, expires_at, revoked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      session.id,
+      session.user_id,
+      session.refresh_token_hash,
+      session.csrf_token_hash,
+      session.device_label,
+      session.created_at,
+      session.last_used_at,
+      session.expires_at,
+      session.revoked_at,
+    )
+    .run();
+}
+
+export async function findWebSessionById(db: D1Database, id: string): Promise<WebSessionRecord | null> {
+  return db.prepare('SELECT * FROM web_sessions WHERE id = ? LIMIT 1').bind(id).first<WebSessionRecord>();
+}
+
+export async function rotateWebSession(
+  db: D1Database,
+  id: string,
+  previousRefreshHash: string,
+  refreshTokenHash: string,
+  csrfTokenHash: string,
+  lastUsedAt: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE web_sessions
+       SET refresh_token_hash = ?, csrf_token_hash = ?, last_used_at = ?
+       WHERE id = ? AND refresh_token_hash = ? AND revoked_at IS NULL`,
+    )
+    .bind(refreshTokenHash, csrfTokenHash, lastUsedAt, id, previousRefreshHash)
+    .run();
+  return (result.meta?.changes ?? 1) > 0;
+}
+
+export async function touchWebSession(db: D1Database, id: string, lastUsedAt: number): Promise<void> {
+  await db.prepare('UPDATE web_sessions SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL').bind(lastUsedAt, id).run();
+}
+
+export async function revokeWebSession(db: D1Database, id: string, revokedAt: number): Promise<void> {
+  await db.prepare('UPDATE web_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(revokedAt, id).run();
+}
+
+export async function revokeUserWebSessions(db: D1Database, userId: string, revokedAt: number): Promise<void> {
+  await db.prepare('UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').bind(revokedAt, userId).run();
+}
+
+export async function listWebSessions(db: D1Database, userId: string, now = Date.now()): Promise<WebSessionSummary[]> {
+  const result = await db
+    .prepare(
+      `SELECT id, device_label, created_at, last_used_at
+       FROM web_sessions
+       WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
+       ORDER BY last_used_at DESC`,
+    )
+    .bind(userId, now)
+    .all<WebSessionSummary>();
+  return result.results;
+}
+
+export async function revokeOtherWebSessions(
+  db: D1Database,
+  userId: string,
+  currentSessionId: string,
+  revokedAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      'UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL',
+    )
+    .bind(revokedAt, userId, currentSessionId)
+    .run();
 }
 
 export async function createServerSession(db: D1Database, session: ServerSessionRecord): Promise<void> {

@@ -1,6 +1,14 @@
 import type { MiddlewareHandler } from 'hono';
-import type { AppEnv, ProfileRecord, TokenRecord, UserRecord } from '../types';
-import { findTokenContext } from '../db/queries';
+import type { AppEnv, TokenRecord } from '../types';
+import {
+  findProfileByUserId,
+  findTokenContext,
+  findUserById,
+  findWebSessionById,
+  touchWebSession,
+} from '../db/queries';
+import { hashSessionToken, getAccessCookie, verifyAccessCookieValue } from '../utils/session';
+import { timingSafeEqual } from '../utils/crypto';
 import { jsonError } from '../utils/errors';
 
 function unauthorized(c: Parameters<MiddlewareHandler<AppEnv>>[0], message: string): Response {
@@ -10,40 +18,63 @@ function unauthorized(c: Parameters<MiddlewareHandler<AppEnv>>[0], message: stri
 export const authMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
   const header = c.req.header('Authorization');
   const token = header?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-  if (!token) return unauthorized(c, 'A Bearer access token is required.');
+  if (token) {
+    const row = await findTokenContext(c.env.DB, token);
+    if (!row) return unauthorized(c, 'The access token is invalid or expired.');
 
-  const row = await findTokenContext(c.env.DB, token);
-  if (!row) return unauthorized(c, 'The access token is invalid or expired.');
+    const user = await findUserById(c.env.DB, row.user_id);
+    const profile = await findProfileByUserId(c.env.DB, row.user_id);
+    if (!user || !profile) return unauthorized(c, 'The access token is invalid or expired.');
 
-  const user: UserRecord = {
-    id: row.user_id,
-    email: row.user_email,
-    password: row.user_password,
-    salt: row.user_salt,
-    role: row.user_role,
-    created_at: row.user_created_at,
-    updated_at: row.user_updated_at,
-  };
-  const profile: ProfileRecord = {
-    id: row.profile_id,
-    user_id: row.user_id,
-    name: row.profile_name,
-    skin_hash: row.skin_hash,
-    cape_hash: row.cape_hash,
-    skin_model: row.skin_model,
-  };
-  const tokenRecord: TokenRecord = {
-    access_token: row.access_token,
-    client_token: row.client_token,
-    user_id: row.user_id,
-    profile_id: row.profile_id,
-    created_at: row.created_at,
-    expires_at: row.expires_at,
-  };
+    const tokenRecord: TokenRecord = {
+      access_token: row.access_token,
+      client_token: row.client_token,
+      user_id: row.user_id,
+      profile_id: row.profile_id,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+    };
 
+    c.set('user', user);
+    c.set('profile', profile);
+    c.set('token', tokenRecord);
+    c.set('authMethod', 'bearer');
+    await next();
+    return;
+  }
+
+  const accessCookie = getAccessCookie(c);
+  if (!accessCookie) return unauthorized(c, 'A Bearer access token is required.');
+  const secret = c.env.WEB_SESSION_SECRET?.trim();
+  const payload = secret ? await verifyAccessCookieValue(accessCookie, secret) : null;
+  const session = payload ? await findWebSessionById(c.env.DB, payload.sessionId) : null;
+  if (
+    !payload ||
+    !session ||
+    session.user_id !== payload.userId ||
+    session.revoked_at !== null ||
+    session.expires_at <= Date.now()
+  ) {
+    return unauthorized(c, 'The web session is invalid or expired.');
+  }
+
+  const csrfToken = c.req.header('X-CSRF-Token')?.trim();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    if (!csrfToken || !timingSafeEqual(await hashSessionToken(csrfToken), session.csrf_token_hash)) {
+      return jsonError(c, 403, 'A valid CSRF token is required.', 'Forbidden');
+    }
+  }
+
+  const user = await findUserById(c.env.DB, session.user_id);
+  const profile = await findProfileByUserId(c.env.DB, session.user_id);
+  if (!user || !profile) return unauthorized(c, 'The web session is invalid or expired.');
+
+  const lastUsedAt = Date.now();
+  await touchWebSession(c.env.DB, session.id, lastUsedAt);
   c.set('user', user);
   c.set('profile', profile);
-  c.set('token', tokenRecord);
+  c.set('webSession', { ...session, last_used_at: lastUsedAt });
+  c.set('authMethod', 'cookie');
   await next();
 };
 

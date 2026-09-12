@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hashPassword, sha256Hex, verifyPassword } from '../src/utils/crypto';
+import { hashPassword, sha256Hex, signHmac, verifyHmac, verifyPassword } from '../src/utils/crypto';
 import { generateProfileId } from '../src/utils/uuid';
 
 describe('crypto utilities', () => {
@@ -17,6 +17,15 @@ describe('crypto utilities', () => {
     await expect(sha256Hex(new TextEncoder().encode('Skinless'))).resolves.toBe(
       '0c91bf66dc48dfa9738985a4224bb72bd02077669fc79885b3637779277eac87',
     );
+  });
+
+  it('signs and verifies values with Web Crypto HMAC', async () => {
+    const signature = await signHmac('session-payload', 'session-secret');
+
+    expect(signature).toMatch(/^[A-Za-z0-9_-]+$/);
+    await expect(verifyHmac('session-payload', signature, 'session-secret')).resolves.toBe(true);
+    await expect(verifyHmac('tampered-payload', signature, 'session-secret')).resolves.toBe(false);
+    await expect(verifyHmac('session-payload', signature, 'wrong-secret')).resolves.toBe(false);
   });
 
   it('generates a protocol-compatible profile id', () => {

@@ -26,7 +26,7 @@ export const corsMiddleware: MiddlewareHandler<AppEnv> = async (c, next) => {
     if (!allowedOrigin || !methodAllowed) return c.body(null, 403);
 
     c.header('Access-Control-Allow-Origin', allowedOrigin);
-    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token');
     c.header('Access-Control-Allow-Methods', ALLOWED_METHODS.join(', '));
     c.header('Access-Control-Max-Age', '86400');
     return c.body(null, 204);

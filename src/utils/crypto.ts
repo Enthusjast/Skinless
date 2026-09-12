@@ -79,3 +79,53 @@ export function encodeBase64Utf8(value: string): string {
 
   return btoa(binary);
 }
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeBase64Url(value: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
+  try {
+    const binary = atob(padded);
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+async function hmacKey(secret: string, usage: KeyUsage): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    [usage],
+  );
+}
+
+export async function signHmac(value: string, secret: string): Promise<string> {
+  const key = await hmacKey(secret, 'sign');
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(value));
+  return encodeBase64Url(new Uint8Array(signature));
+}
+
+export async function verifyHmac(value: string, signature: string, secret: string): Promise<boolean> {
+  const decoded = decodeBase64Url(signature);
+  if (!decoded) return false;
+
+  try {
+    const key = await hmacKey(secret, 'verify');
+    return await crypto.subtle.verify('HMAC', key, decoded as unknown as BufferSource, encoder.encode(value));
+  } catch {
+    return false;
+  }
+}

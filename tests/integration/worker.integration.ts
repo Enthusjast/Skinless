@@ -42,6 +42,20 @@ function decodeBase64(value: string): Uint8Array {
   return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
 }
 
+function cookieValue(setCookie: string, name: string): string {
+  const match = setCookie.match(new RegExp(`${name}=([^;]+)`));
+  if (!match) throw new Error(`Missing ${name} cookie`);
+  return match[1];
+}
+
+function cookieHeader(setCookie: string): string {
+  return [
+    '__Host-skinless_access',
+    '__Host-skinless_refresh',
+    'skinless_csrf',
+  ].map((name) => `${name}=${cookieValue(setCookie, name)}`).join('; ');
+}
+
 describe('Cloudflare runtime integration', () => {
   it('completes the account, texture, and server join path using D1 and R2', async () => {
     const registerResponse = await jsonRequest('/api/register', {
@@ -80,6 +94,46 @@ describe('Cloudflare runtime integration', () => {
       name: PROFILE_NAME,
       skin_hash: null,
       skin_model: 'classic',
+    });
+
+    const webSessionTable = await env.DB
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'web_sessions'")
+      .first<{ name: string }>();
+    expect(webSessionTable).toEqual({ name: 'web_sessions' });
+
+    const webLoginResponse = await SELF.fetch('https://worker.test/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+      },
+      body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+    });
+    expect(webLoginResponse.status).toBe(200);
+    const webLoginBody = await webLoginResponse.json() as { user: UserResponse; csrfToken: string };
+    expect(webLoginBody.user).toMatchObject({ id: registerBody.user.id, email: EMAIL, profile: { name: PROFILE_NAME } });
+
+    const webSetCookie = webLoginResponse.headers.get('set-cookie') ?? '';
+    const webSessionId = cookieValue(webSetCookie, '__Host-skinless_refresh').split('.')[0];
+    const webSessionRow = await env.DB
+      .prepare('SELECT id, user_id, refresh_token_hash, csrf_token_hash, device_label, revoked_at FROM web_sessions WHERE id = ?')
+      .bind(webSessionId)
+      .first<{ id: string; user_id: string; refresh_token_hash: string; csrf_token_hash: string; device_label: string; revoked_at: number | null }>();
+    expect(webSessionRow).toMatchObject({
+      id: webSessionId,
+      user_id: registerBody.user.id,
+      device_label: 'Chrome on macOS',
+      revoked_at: null,
+    });
+    expect(webSessionRow?.refresh_token_hash).not.toContain(cookieValue(webSetCookie, '__Host-skinless_refresh'));
+    expect(webSessionRow?.csrf_token_hash).not.toBe(webLoginBody.csrfToken);
+
+    const webProfileResponse = await SELF.fetch('https://worker.test/api/user/profile', {
+      headers: { Cookie: cookieHeader(webSetCookie) },
+    });
+    expect(webProfileResponse.status).toBe(200);
+    await expect(webProfileResponse.json()).resolves.toMatchObject({
+      user: { id: registerBody.user.id, email: EMAIL, profile: { name: PROFILE_NAME } },
     });
 
     const authenticateResponse = await jsonRequest('/authserver/authenticate', {

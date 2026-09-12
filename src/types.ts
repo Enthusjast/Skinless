@@ -10,12 +10,15 @@ export interface Bindings {
   CORS_ORIGIN?: string;
   SERVER_NAME?: string;
   IMPLEMENTATION_VERSION?: string;
+  WEB_SESSION_SECRET?: string;
 }
 
 export interface Variables {
   user: UserRecord;
   profile: ProfileRecord;
-  token: TokenRecord;
+  token?: TokenRecord;
+  authMethod: 'bearer' | 'cookie';
+  webSession?: WebSessionRecord;
 }
 
 export type AppEnv = {
@@ -49,6 +52,18 @@ export interface TokenRecord {
   profile_id: string;
   created_at: number;
   expires_at: number;
+}
+
+export interface WebSessionRecord {
+  id: string;
+  user_id: string;
+  refresh_token_hash: string;
+  csrf_token_hash: string;
+  device_label: string;
+  created_at: number;
+  last_used_at: number;
+  expires_at: number;
+  revoked_at: number | null;
 }
 
 export interface UserWithProfile extends UserRecord {
