@@ -14,4 +14,12 @@ describe('workspace routes', () => {
       },
     });
   });
+
+  it('exposes canonical and name-alias public profile routes with noindex metadata', () => {
+    const canonical = router.getRoutes().find((route) => route.path === '/profiles/:uuid');
+    const alias = router.getRoutes().find((route) => route.path === '/profiles/name/:name');
+
+    expect(canonical).toMatchObject({ meta: { noindex: true, publicProfile: true } });
+    expect(alias).toMatchObject({ meta: { noindex: true, publicProfile: true } });
+  });
 });

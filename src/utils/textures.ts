@@ -11,19 +11,33 @@ export interface TexturePayloadInput {
   textureBaseUrl: string;
 }
 
-export function createTexturesProperty(input: TexturePayloadInput): TextureProperty | null {
+export interface TexturePayloadTexture {
+  url: string;
+  metadata?: { model: 'slim' };
+}
+
+export interface TexturePayload {
+  SKIN?: TexturePayloadTexture;
+  CAPE?: { url: string };
+}
+
+export function createTexturePayload(input: TexturePayloadInput): TexturePayload | null {
   if (!input.skinHash && !input.capeHash) return null;
 
-  const textures: Record<string, unknown> = {};
+  const textures: TexturePayload = {};
   if (input.skinHash) {
     textures.SKIN = {
       url: `${input.textureBaseUrl}/textures/${input.skinHash}`,
       ...(input.skinModel === 'slim' ? { metadata: { model: 'slim' } } : {}),
     };
   }
-  if (input.capeHash) {
-    textures.CAPE = { url: `${input.textureBaseUrl}/textures/${input.capeHash}` };
-  }
+  if (input.capeHash) textures.CAPE = { url: `${input.textureBaseUrl}/textures/${input.capeHash}` };
+  return textures;
+}
+
+export function createTexturesProperty(input: TexturePayloadInput): TextureProperty | null {
+  const textures = createTexturePayload(input);
+  if (!textures) return null;
 
   const payload = {
     timestamp: input.timestamp ?? Date.now(),

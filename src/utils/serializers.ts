@@ -1,4 +1,5 @@
 import type { ProfileRecord, UserRecord, UserWithProfile } from '../types';
+import { createTexturePayload } from './textures';
 
 export function serializeProfile(profile: ProfileRecord) {
   return {
@@ -7,6 +8,24 @@ export function serializeProfile(profile: ProfileRecord) {
     skinHash: profile.skin_hash,
     capeHash: profile.cape_hash,
     skinModel: profile.skin_model,
+  };
+}
+
+export function serializePublicProfile(profile: ProfileRecord, textureBaseUrl: string) {
+  const textures = createTexturePayload({
+    profileId: profile.id,
+    profileName: profile.name,
+    skinHash: profile.skin_hash,
+    capeHash: profile.cape_hash,
+    skinModel: profile.skin_model,
+    textureBaseUrl,
+  });
+  return {
+    id: profile.id,
+    name: profile.name,
+    model: profile.skin_model,
+    skin: textures?.SKIN ?? null,
+    cape: textures?.CAPE ?? null,
   };
 }
 

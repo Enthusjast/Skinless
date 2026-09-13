@@ -16,6 +16,16 @@ const router = createRouter({
         { path: 'forgot-password', component: () => import('./views/PasswordResetView.vue') },
         { path: 'reset-password', component: () => import('./views/PasswordResetView.vue') },
         { path: 'restore-account', component: () => import('./views/RestoreAccountView.vue') },
+        {
+          path: 'profiles/name/:name',
+          component: () => import('./views/PublicProfileView.vue'),
+          meta: { noindex: true, publicProfile: true, title: '公开 Profile' },
+        },
+        {
+          path: 'profiles/:uuid',
+          component: () => import('./views/PublicProfileView.vue'),
+          meta: { noindex: true, publicProfile: true, title: '公开 Profile' },
+        },
       ],
     },
     {
@@ -79,7 +89,16 @@ router.beforeEach(async (to) => {
   return true;
 });
 
-router.afterEach(() => {
+router.afterEach((to) => {
+  const robotsMeta = document.head.querySelector('meta[name="robots"]');
+  if (to.meta.noindex) {
+    const meta = robotsMeta ?? document.head.appendChild(document.createElement('meta'));
+    meta.setAttribute('name', 'robots');
+    meta.setAttribute('content', 'noindex, nofollow');
+    document.title = `${String(to.meta.title ?? '公开 Profile')} · Skinless`;
+  } else {
+    robotsMeta?.remove();
+  }
   window.requestAnimationFrame(() => {
     document.querySelector<HTMLElement>('#main-content, #workspace-content')?.focus();
   });

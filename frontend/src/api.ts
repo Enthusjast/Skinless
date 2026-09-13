@@ -11,6 +11,19 @@ export interface ApiProfile {
   skinModel: 'classic' | 'slim';
 }
 
+export interface PublicTexture {
+  url: string;
+  metadata?: { model: 'slim' };
+}
+
+export interface PublicProfile {
+  id: string;
+  name: string;
+  model: 'classic' | 'slim';
+  skin: PublicTexture | null;
+  cape: { url: string } | null;
+}
+
 export interface ProfileCollection {
   profiles: ApiProfile[];
   defaultProfileId: string | null;
@@ -470,6 +483,18 @@ export function logout(): Promise<void> {
 
 export function getUserProfile(): Promise<{ user: ApiUser } & ProfileCollection> {
   return managementRequest<{ user: ApiUser } & ProfileCollection>('/api/user/profile');
+}
+
+export function getPublicProfileById(profileId: string): Promise<PublicProfile> {
+  return request<PublicProfile>(`/api/public/profiles/${encodeURIComponent(profileId)}`);
+}
+
+export async function getPublicProfileByName(profileName: string): Promise<PublicProfile | null> {
+  return (
+    (await request<PublicProfile | undefined>(
+      `/api/public/profiles/name/${encodeURIComponent(profileName)}`,
+    )) ?? null
+  );
 }
 
 export function getDiagnostics(): Promise<LauncherDiagnostics> {
