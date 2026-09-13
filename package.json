@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --port 8787 --var ENVIRONMENT:development --var WEB_SESSION_SECRET:skinless-development-only-session-secret --var YGGDRASIL_ALLOW_UNSIGNED_TEXTURES:true",
     "build": "pnpm --filter @skinless/frontend build",
     "lint": "pnpm --filter @skinless/frontend lint",
     "format:check": "pnpm --filter @skinless/frontend format:check",

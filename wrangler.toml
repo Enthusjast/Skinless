@@ -25,6 +25,9 @@ new_classes = ["RateLimiterDurableObject"]
 crons = ["0 3 * * *"]
 
 [vars]
+# These defaults are production-safe. `npm run dev` overrides the development
+# values through command-line vars and does not deploy them.
+ENVIRONMENT = "production"
 SKIN_DOMAIN = "localhost:8787"
 API_BASE_URL = "http://localhost:8787"
 TOKEN_EXPIRY_HOURS = "24"

@@ -35,15 +35,15 @@ pnpm frontend:dev
 VITE_API_BASE_URL=
 ```
 
-本地 Worker 至少需要一个 `.dev.vars`：
+`pnpm dev` 会自动使用开发参数启动 Worker：
 
-```dotenv
-ENVIRONMENT=local
-WEB_SESSION_SECRET=replace-with-a-long-random-local-secret
+```text
+ENVIRONMENT=development
+WEB_SESSION_SECRET=development-only
 YGGDRASIL_ALLOW_UNSIGNED_TEXTURES=true
 ```
 
-`YGGDRASIL_ALLOW_UNSIGNED_TEXTURES=true` 只允许在 `local`、`development` 或 `test` 环境使用。需要测试邮箱流程时，还要配置 Resend 的 API key 和发件人；前端 Turnstile site key 放在 `frontend/.env.local` 的 `VITE_TURNSTILE_SITE_KEY` 中。
+因此本地开发不需要配置生产环境的 RSA 签名密钥或 Web session secret。上述值只由 `wrangler dev` 注入，不会被 `wrangler deploy` 带入生产环境。需要测试真实邮箱流程时，仍要配置 Resend 的 API key 和发件人；前端 Turnstile site key 放在 `frontend/.env.local` 的 `VITE_TURNSTILE_SITE_KEY` 中。
 
 ## 验证命令
 
