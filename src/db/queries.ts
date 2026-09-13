@@ -395,6 +395,16 @@ export async function deleteUserTokens(
   await db.prepare("DELETE FROM tokens WHERE user_id = ?").bind(userId).run();
 }
 
+export async function deleteUserServerSessions(
+  db: D1Database,
+  userId: string,
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM server_sessions WHERE user_id = ?")
+    .bind(userId)
+    .run();
+}
+
 export async function insertWebSession(
   db: D1Database,
   session: WebSessionRecord,
@@ -763,25 +773,26 @@ export async function startAccountDeletion(
       .prepare(
         `UPDATE users
          SET status = 'pending_deletion', deletion_requested_at = ?, updated_at = ?
-         WHERE id = ? AND status = 'active' AND deletion_requested_at IS NULL`,
+         WHERE id = ? AND status = 'active' AND deletion_requested_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM account_challenges
+             WHERE user_id = ? AND purpose = ?
+           )`,
       )
-      .bind(deletionRequestedAt, challenge.updated_at, userId),
+      .bind(
+        deletionRequestedAt,
+        challenge.updated_at,
+        userId,
+        userId,
+        challenge.purpose,
+      ),
     db
       .prepare(
         `INSERT INTO account_challenges
          (id, user_id, purpose, email, code_hash, attempts, last_sent_at, expires_at, created_at, updated_at)
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-         WHERE EXISTS (
-           SELECT 1 FROM users
-           WHERE id = ? AND status = 'pending_deletion' AND deletion_requested_at = ?
-         )
-         ON CONFLICT (user_id, purpose) DO UPDATE SET
-           email = excluded.email,
-           code_hash = excluded.code_hash,
-           attempts = excluded.attempts,
-           last_sent_at = excluded.last_sent_at,
-           expires_at = excluded.expires_at,
-           updated_at = excluded.updated_at`,
+         WHERE changes() > 0
+         ON CONFLICT (user_id, purpose) DO NOTHING`,
       )
       .bind(
         challenge.id,
@@ -794,8 +805,6 @@ export async function startAccountDeletion(
         challenge.expires_at,
         challenge.created_at,
         challenge.updated_at,
-        userId,
-        deletionRequestedAt,
       ),
   ]);
   const userUpdate = results[0] as { meta?: { changes?: number } } | undefined;
@@ -904,13 +913,16 @@ export async function deleteExpiredPendingAccount(
       )
       .bind(now, userId, userId, now),
     db
+      .prepare(`DELETE FROM server_sessions WHERE user_id = ? AND ${pendingCondition}`)
+      .bind(userId, userId, now),
+    db
       .prepare(
         `DELETE FROM users
          WHERE id = ? AND status = 'pending_deletion' AND deletion_requested_at <= ?`,
       )
       .bind(userId, now),
   ]);
-  const userDelete = results[3] as { meta?: { changes?: number } } | undefined;
+  const userDelete = results[4] as { meta?: { changes?: number } } | undefined;
   return (userDelete?.meta?.changes ?? 0) > 0;
 }
 

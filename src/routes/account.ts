@@ -5,6 +5,7 @@ import {
   completePasswordReset,
   claimAccountChallengeResend,
   deleteUserTokens,
+  deleteUserServerSessions,
   findAccountChallengeById,
   findAccountChallengeByUserAndPurpose,
   findUserByEmail,
@@ -592,11 +593,10 @@ routes.post('/user/deletion', authMiddleware, async (c) => {
   const now = Date.now();
   const deletionAt = now + ACCOUNT_DELETION_GRACE_PERIOD_MS;
   const code = generateVerificationCode();
-  const deliveryError = await deliverManagedCode(c, ACCOUNT_RESTORE_PURPOSE, user.email, code);
-  if (deliveryError) return deliveryError;
+  if (!mailSender(c)) return mailConfigurationError(c);
 
   const challengeId = generateUserId();
-  const started = await startAccountDeletion(c.env.DB, user.id, deletionAt, {
+  const challenge = {
     id: challengeId,
     user_id: user.id,
     purpose: ACCOUNT_RESTORE_PURPOSE,
@@ -607,8 +607,28 @@ routes.post('/user/deletion', authMiddleware, async (c) => {
     expires_at: now + ACCOUNT_RESTORE_CODE_TTL_MS,
     created_at: now,
     updated_at: now,
-  });
+  };
+  const started = await startAccountDeletion(c.env.DB, user.id, deletionAt, challenge);
   if (!started) {
+    const pendingUser = await findUserById(c.env.DB, user.id);
+    const pendingChallenge = await findAccountChallengeByUserAndPurpose(
+      c.env.DB,
+      user.id,
+      ACCOUNT_RESTORE_PURPOSE,
+    );
+    if (
+      pendingUser?.status === 'pending_deletion' &&
+      typeof pendingUser.deletion_requested_at === 'number' &&
+      pendingChallenge
+    ) {
+      clearWebSessionCookies(c);
+      return c.json({
+        challengeId: pendingChallenge.id,
+        deletionAt: pendingUser.deletion_requested_at,
+        restoreUntil: pendingUser.deletion_requested_at,
+        status: 'pending_deletion',
+      }, 202);
+    }
     return jsonError(
       c,
       409,
@@ -618,8 +638,15 @@ routes.post('/user/deletion', authMiddleware, async (c) => {
     );
   }
 
+  const deliveryError = await deliverManagedCode(c, ACCOUNT_RESTORE_PURPOSE, user.email, code);
+  if (deliveryError) {
+    await restoreAccount(c.env.DB, challenge, Date.now());
+    return deliveryError;
+  }
+
   await deleteUserTokens(c.env.DB, user.id);
   await revokeUserWebSessions(c.env.DB, user.id, now);
+  await deleteUserServerSessions(c.env.DB, user.id);
   clearWebSessionCookies(c);
   return c.json({
     challengeId,

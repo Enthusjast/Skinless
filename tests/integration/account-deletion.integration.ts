@@ -5,6 +5,8 @@ import {
   ACCOUNT_DELETION_GRACE_PERIOD_MS,
   ACCOUNT_RESTORE_PURPOSE,
 } from '../../src/utils/account';
+import { startAccountDeletion } from '../../src/db/queries';
+import { sha256Hex } from '../../src/utils/crypto';
 import { registerVerifiedAccount } from './verified-registration-fixture';
 
 const PASSWORD = 'correct-password';
@@ -31,6 +33,41 @@ function mailBindings(sent: SentRestoreCode[]) {
   };
 }
 
+function gatedRateLimiter() {
+  let calls = 0;
+  let resolveReady!: () => void;
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    resolveReady = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const stub = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch() {
+          calls += 1;
+          if (calls === 4) resolveReady();
+          await gate;
+          return new Response(JSON.stringify({
+            allowed: true,
+            blocked: false,
+            retryAfter: 0,
+            failedCount: 0,
+          }), {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      };
+    },
+  };
+  return { binding: stub, ready, release };
+}
+
 function cookieValue(setCookie: string, name: string): string {
   const match = setCookie.match(new RegExp(`${name}=([^;]+)`));
   if (!match) throw new Error(`Missing ${name} cookie`);
@@ -43,7 +80,7 @@ function cookieHeader(setCookie: string): string {
     .join('; ');
 }
 
-async function webLogin(email: string, password: string, bindings = env): Promise<WebSession> {
+async function webLogin(email: string, password: string, bindings: unknown = env): Promise<WebSession> {
   const response = await app.request(
     'https://worker.test/api/auth/login',
     {
@@ -63,7 +100,7 @@ async function webLogin(email: string, password: string, bindings = env): Promis
   };
 }
 
-function request(path: string, init: RequestInit = {}, bindings = env): Promise<Response> {
+function request(path: string, init: RequestInit = {}, bindings: unknown = env): Promise<Response> {
   return Promise.resolve(app.request(`https://worker.test${path}`, init, bindings as never));
 }
 
@@ -72,7 +109,7 @@ function cookieRequest(
   method: string,
   session: WebSession,
   body: unknown,
-  bindings = env,
+  bindings: unknown = env,
 ): Promise<Response> {
   return request(path, {
     method,
@@ -270,6 +307,148 @@ describe('recoverable account deletion against real D1', () => {
       body: JSON.stringify({ email, password: PASSWORD }),
     }, bindings);
     expect(login.status).toBe(200);
+  });
+
+  it('does not revive an old server join session after deletion and restore', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+    const email = `join-restore-${suffix}@example.com`;
+    const account = await registerVerifiedAccount(email, PASSWORD, `Jst${suffix}`);
+    const sent: SentRestoreCode[] = [];
+    const bindings = mailBindings(sent);
+    const session = await webLogin(email, PASSWORD, bindings);
+    const authenticate = await request('/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: email, password: PASSWORD, clientToken: `client-${suffix}` }),
+    }, bindings);
+    const token = (await authenticate.json() as { accessToken: string }).accessToken;
+    const serverId = `restore-server-${suffix}`;
+    const join = await request('/sessionserver/session/minecraft/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accessToken: token,
+        selectedProfile: { id: account.profile.id },
+        serverId,
+      }),
+    }, bindings);
+    expect(join.status).toBe(204);
+
+    const deletion = await cookieRequest('/api/user/deletion', 'POST', session, {
+      currentPassword: PASSWORD,
+      confirmation: 'DELETE',
+    }, bindings);
+    expect(deletion.status).toBe(202);
+    const deletionBody = await deletion.json() as { challengeId: string };
+    await expect(env.DB.prepare(
+      'SELECT server_id FROM server_sessions WHERE user_id = ? AND server_id = ?',
+    ).bind(account.id, serverId).first()).resolves.toBeNull();
+
+    const restored = await request('/api/auth/account/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, challengeId: deletionBody.challengeId, code: sent[0]?.code }),
+    }, bindings);
+    expect(restored.status).toBe(204);
+
+    const hasJoined = await request(
+      `/sessionserver/session/minecraft/hasJoined?username=${encodeURIComponent(account.profile.name)}&serverId=${encodeURIComponent(serverId)}`,
+      {},
+      bindings,
+    );
+    expect(hasJoined.status).toBe(204);
+  });
+
+  it('keeps one restore challenge when deletion claims race at the same timestamp', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+    const email = `race-${suffix}@example.com`;
+    const account = await registerVerifiedAccount(email, PASSWORD, `Race${suffix}`);
+    const requestedAt = Date.now() + ACCOUNT_DELETION_GRACE_PERIOD_MS;
+    const firstCode = '111111';
+    const secondCode = '222222';
+    const firstChallenge = {
+      id: crypto.randomUUID(),
+      user_id: account.id,
+      purpose: ACCOUNT_RESTORE_PURPOSE,
+      email,
+      code_hash: await sha256Hex(new TextEncoder().encode(firstCode)),
+      attempts: 0,
+      last_sent_at: Date.now(),
+      expires_at: requestedAt,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    } as const;
+    const secondChallenge = {
+      ...firstChallenge,
+      id: crypto.randomUUID(),
+      code_hash: await sha256Hex(new TextEncoder().encode(secondCode)),
+    } as const;
+
+    const [firstStarted, secondStarted] = await Promise.all([
+      startAccountDeletion(env.DB, account.id, requestedAt, firstChallenge),
+      startAccountDeletion(env.DB, account.id, requestedAt, secondChallenge),
+    ]);
+
+    expect([firstStarted, secondStarted].filter(Boolean)).toHaveLength(1);
+    const winner = firstStarted ? firstChallenge : secondChallenge;
+    const stored = await env.DB.prepare(
+      'SELECT id, code_hash FROM account_challenges WHERE user_id = ? AND purpose = ?',
+    ).bind(account.id, ACCOUNT_RESTORE_PURPOSE).first<{ id: string; code_hash: string }>();
+    expect(stored).toEqual({ id: winner.id, code_hash: winner.code_hash });
+    const user = await env.DB.prepare(
+      'SELECT status, deletion_requested_at FROM users WHERE id = ?',
+    ).bind(account.id).first<{ status: string; deletion_requested_at: number }>();
+    expect(user).toEqual({ status: 'pending_deletion', deletion_requested_at: requestedAt });
+  });
+
+  it('returns one durable restore challenge for concurrent deletion requests', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+    const email = `request-race-${suffix}@example.com`;
+    await registerVerifiedAccount(email, PASSWORD, `ReqR${suffix}`);
+    const firstSession = await webLogin(email, PASSWORD);
+    const secondSession = await webLogin(email, PASSWORD);
+    const sent: SentRestoreCode[] = [];
+    const limiter = gatedRateLimiter();
+    const bindings = {
+      ...env,
+      ...mailBindings(sent),
+      RATE_LIMITER: limiter.binding,
+    };
+
+    const responses = Promise.all([
+      cookieRequest('/api/user/deletion', 'POST', firstSession, {
+        currentPassword: PASSWORD,
+        confirmation: 'DELETE',
+      }, bindings),
+      cookieRequest('/api/user/deletion', 'POST', secondSession, {
+        currentPassword: PASSWORD,
+        confirmation: 'DELETE',
+      }, bindings),
+    ]);
+    await limiter.ready;
+    limiter.release();
+    const [firstResponse, secondResponse] = await responses;
+    expect(firstResponse.status).toBe(202);
+    expect(secondResponse.status).toBe(202);
+    const firstBody = await firstResponse.json() as { challengeId: string; deletionAt: number };
+    const secondBody = await secondResponse.json() as { challengeId: string; deletionAt: number };
+    expect(secondBody).toEqual(firstBody);
+    expect(sent).toHaveLength(1);
+
+    const challenge = await env.DB.prepare(
+      'SELECT id, code_hash FROM account_challenges WHERE id = ?',
+    ).bind(firstBody.challengeId).first<{ id: string; code_hash: string }>();
+    expect(challenge).toEqual({
+      id: firstBody.challengeId,
+      code_hash: await sha256Hex(new TextEncoder().encode(sent[0]!.code)),
+    });
+
+    const restored = await request('/api/auth/account/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code: sent[0]!.code }),
+    }, bindings);
+    expect(restored.status).toBe(204);
   });
 
   it('rejects expired restore codes and cron removes only a bounded batch while queueing GC', async () => {
