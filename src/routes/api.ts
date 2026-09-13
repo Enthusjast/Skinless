@@ -1198,6 +1198,7 @@ async function deleteAdminUserAccount(c: Context<AppEnv>): Promise<Response> {
   );
   if (confirmationError) return confirmationError;
   const userId = c.req.param('id') ?? '';
+  const actor = c.get('user');
   const user = await findUserById(c.env.DB, userId);
   if (!user) return adminUserNotFound(c);
   const now = Date.now();
@@ -1215,12 +1216,17 @@ async function deleteAdminUserAccount(c: Context<AppEnv>): Promise<Response> {
   }
   if (!deleted) return adminMutationConflict(c, userId, c.get('user').id);
   await writeAudit(c, {
-    actorUserId: c.get('user').id,
+    actorUserId: actor.id === userId ? null : actor.id,
     targetUserId: null,
     targetResource: `user:${userId}`,
     action: AUDIT_ACTIONS.ADMIN_USER_DELETE,
     result: 'success',
-    metadata: { deletedUserId: userId },
+    metadata: {
+      deletedUserId: userId,
+      ...(actor.id === userId
+        ? { actorSnapshot: { id: actor.id, email: actor.email, role: actor.role } }
+        : {}),
+    },
   });
   return c.body(null, 204);
 }

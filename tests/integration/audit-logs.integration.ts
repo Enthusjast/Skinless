@@ -6,6 +6,7 @@ import { registerVerifiedAccount } from './verified-registration-fixture';
 
 interface Client {
   userId: string;
+  email: string;
   accessToken: string;
 }
 
@@ -30,7 +31,7 @@ async function createClient(role: 'user' | 'admin' = 'user'): Promise<Client> {
   });
   expect(response.status).toBe(200);
   const body = await response.json() as { accessToken: string };
-  return { userId: account.id, accessToken: body.accessToken };
+  return { userId: account.id, email, accessToken: body.accessToken };
 }
 
 function request(path: string, accessToken: string, init: RequestInit = {}): Promise<Response> {
@@ -224,6 +225,7 @@ describe('administrator audit logs against real D1', () => {
     const admin = await createClient('admin');
     const target = await createClient();
     const actorToDelete = await createClient();
+    const selfDeletingAdmin = await createClient('admin');
 
     await recordAuditLog(env.DB, {
       id: `audit-nullable-${crypto.randomUUID()}`,
@@ -250,6 +252,14 @@ describe('administrator audit logs against real D1', () => {
     );
     expect(deletedActor.status).toBe(204);
 
+    const selfDeleted = await jsonRequest(
+      `/api/admin/users/${selfDeletingAdmin.userId}`,
+      selfDeletingAdmin.accessToken,
+      'DELETE',
+      { confirmation: 'DELETE' },
+    );
+    expect(selfDeleted.status).toBe(204);
+
     const row = await env.DB.prepare(
       'SELECT actor_user_id, target_user_id FROM audit_logs WHERE action = ? LIMIT 1',
     ).bind('test.nullable.references').first();
@@ -263,8 +273,24 @@ describe('administrator audit logs against real D1', () => {
     expect(deleteBody.logs).toEqual(expect.arrayContaining([
       expect.objectContaining({
         action: 'admin.user.delete',
+        actorUserId: admin.userId,
         targetUserId: null,
         targetResource: `user:${target.userId}`,
+      }),
+      expect.objectContaining({
+        action: 'admin.user.delete',
+        result: 'success',
+        actorUserId: null,
+        targetUserId: null,
+        targetResource: `user:${selfDeletingAdmin.userId}`,
+        metadata: {
+          deletedUserId: selfDeletingAdmin.userId,
+          actorSnapshot: {
+            id: selfDeletingAdmin.userId,
+            email: selfDeletingAdmin.email,
+            role: 'admin',
+          },
+        },
       }),
     ]));
   });

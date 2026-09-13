@@ -50,9 +50,17 @@ describe('audit log writes', () => {
         accessToken: 'access-secret',
         refresh_token: 'refresh-secret',
         csrfToken: 'csrf-secret',
+        csrf: 'csrf-header-secret',
         code: '123456',
         ip: '192.0.2.1',
+        ip_address: '198.51.100.2',
+        remote_ip: '198.51.100.3',
+        x_forwarded_for: '198.51.100.4',
         userAgent: 'secret browser',
+        user_agent: 'another secret browser',
+        ua: 'short user-agent alias',
+        authorization_header: 'Bearer secret',
+        cookie_header: 'session=secret',
         nested: {
           safe: true,
           verificationCode: '654321',
@@ -66,6 +74,40 @@ describe('audit log writes', () => {
     expect(JSON.stringify(metadata)).not.toContain('password-secret');
     expect(JSON.stringify(metadata)).not.toContain('192.0.2.1');
     expect(db.statements[0]?.sql).toContain('INSERT INTO audit_logs');
+  });
+
+  it('preserves safe metadata while redacting network and credential aliases recursively', async () => {
+    const db = new AuditDatabase();
+
+    await recordAuditLog(db as unknown as D1Database, {
+      action: 'admin.user.delete',
+      result: 'success',
+      metadata: {
+        fromRole: 'admin',
+        toRole: 'user',
+        actorSnapshot: { id: 'admin-1', email: 'admin@example.com', role: 'admin' },
+        nested: {
+          targetResource: 'user:user-1',
+          source: 'admin-api',
+          csrf_token: 'csrf-secret',
+          userAgentString: 'secret browser',
+          clientIpAddress: '192.0.2.5',
+          authorizationHeader: 'Bearer secret',
+          setCookie: 'session=secret',
+        },
+      },
+    });
+
+    const metadata = JSON.parse(String(db.statements[0]?.values[7])) as Record<string, unknown>;
+    expect(metadata).toEqual({
+      fromRole: 'admin',
+      toRole: 'user',
+      actorSnapshot: { id: 'admin-1', email: 'admin@example.com', role: 'admin' },
+      nested: {
+        targetResource: 'user:user-1',
+        source: 'admin-api',
+      },
+    });
   });
 
   it('isolates a failed audit insert from the primary operation and logs the failure', async () => {

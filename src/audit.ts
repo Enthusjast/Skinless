@@ -32,6 +32,39 @@ export interface AuditLogEvent {
 type SafeJsonValue = string | number | boolean | null | SafeJsonValue[] | { [key: string]: SafeJsonValue };
 
 const SENSITIVE_METADATA_KEY = /(?:password|salt|token|code|ip|useragent|authorization|cookie|secret)/i;
+const SENSITIVE_METADATA_ALIASES = new Set([
+  'auth',
+  'authheader',
+  'authorizationheader',
+  'cfconnectingip',
+  'clientaddress',
+  'clientip',
+  'clientipaddress',
+  'cookieheader',
+  'cookies',
+  'csrf',
+  'csrfheader',
+  'forwarded',
+  'forwardedfor',
+  'ipaddress',
+  'proxyauthorization',
+  'realip',
+  'realipaddress',
+  'remoteaddress',
+  'remoteip',
+  'remoteipaddress',
+  'setcookie',
+  'setcookieheader',
+  'sourceip',
+  'sourceipaddress',
+  'trueclientip',
+  'ua',
+  'uaheader',
+  'useragentheader',
+  'useragentstring',
+  'xforwardedfor',
+  'xrealip',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -49,7 +82,8 @@ function safeJsonValue(value: unknown): SafeJsonValue | undefined {
 
   const result: { [key: string]: SafeJsonValue } = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (SENSITIVE_METADATA_KEY.test(key.replace(/[^a-z0-9]/gi, ''))) continue;
+    const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (SENSITIVE_METADATA_KEY.test(normalizedKey) || SENSITIVE_METADATA_ALIASES.has(normalizedKey)) continue;
     const safeEntry = safeJsonValue(entry);
     if (safeEntry !== undefined) result[key] = safeEntry;
   }
