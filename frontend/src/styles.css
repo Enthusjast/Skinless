@@ -2844,8 +2844,10 @@ td select {
   box-shadow: 0 0 0 4px var(--focus);
 }
 .admin-secret-callout {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   padding: 12px;
   margin: 18px 0 0;
   color: var(--success);
@@ -2854,6 +2856,14 @@ td select {
   border-radius: var(--radius-sm);
   font-size: 0.8rem;
   line-height: 1.5;
+}
+.admin-secret-main {
+  min-width: 0;
+  flex: 1;
+}
+.admin-secret-callout .copy-id-button {
+  min-height: 36px;
+  flex: 0 0 auto;
 }
 .admin-secret-callout code,
 .admin-invite-main code {

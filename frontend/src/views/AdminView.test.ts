@@ -155,16 +155,28 @@ describe('AdminView registration controls', () => {
       enforceJoinIp: true,
     });
 
-    await wrapper.get('input[name="invite-use-limit"]').setValue('2');
+    await wrapper.get('select[name="invite-use-limit"]').setValue('10');
+    await wrapper.get('select[name="invite-expires-preset"]').setValue('custom');
+    await wrapper.get('input[name="invite-expires-at"]').setValue('2030-01-01T00:00');
     await wrapper.get('textarea[name="invite-note"]').setValue('Launch group');
     await wrapper.get('form.admin-invite-form').trigger('submit');
     await flushPromises();
     expect(createAdminInvite).toHaveBeenCalledWith({
-      useLimit: 2,
-      expiresAt: null,
+      useLimit: 10,
+      expiresAt: Date.parse('2030-01-01T00:00'),
       note: 'Launch group',
     });
     expect(wrapper.get('[data-state="invite-created"]').text()).toContain('secret-code');
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    await wrapper.get('[data-action="copy-invite"]').trigger('click');
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith('secret-code');
+    expect(wrapper.get('[data-action="copy-invite"]').text()).toContain('已复制');
 
     await wrapper.get('[data-action="revoke-invite"]').trigger('click');
     await flushPromises();

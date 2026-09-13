@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   Ban,
+  Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Filter,
   MoreHorizontal,
   RefreshCw,
@@ -64,9 +66,12 @@ const inviteCreating = ref(false);
 const inviteActionError = ref('');
 const inviteMessage = ref('');
 const inviteUseLimit = ref(1);
+const inviteUsePreset = ref<'1' | '5' | '10' | '20' | 'custom'>('1');
+const inviteExpiryPreset = ref<'24h' | '7d' | '30d' | '365d' | 'custom'>('30d');
 const inviteExpiresAt = ref('');
 const inviteNote = ref('');
 const createdInviteCode = ref('');
+const inviteCopied = ref(false);
 const revokingInvite = ref<string | null>(null);
 const openMenuUserId = ref<string | null>(null);
 const actionUser = ref<AdminUser | null>(null);
@@ -317,10 +322,37 @@ function withoutInviteCode(invite: AdminInvite): AdminInvite {
   return redacted;
 }
 
+const inviteExpiryDurations: Record<Exclude<typeof inviteExpiryPreset.value, 'custom'>, number> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+  '365d': 365 * 24 * 60 * 60 * 1000,
+};
+
+watch(inviteUsePreset, (preset) => {
+  if (preset !== 'custom') inviteUseLimit.value = Number(preset);
+});
+
 function inviteExpiry(): number | null {
-  if (!inviteExpiresAt.value) return null;
-  const parsed = Date.parse(inviteExpiresAt.value);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (inviteExpiryPreset.value === 'custom') {
+    if (!inviteExpiresAt.value) return null;
+    const parsed = Date.parse(inviteExpiresAt.value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return Date.now() + inviteExpiryDurations[inviteExpiryPreset.value];
+}
+
+async function copyInviteCode() {
+  if (!createdInviteCode.value) return;
+  try {
+    await navigator.clipboard?.writeText(createdInviteCode.value);
+    inviteCopied.value = true;
+    window.setTimeout(() => {
+      inviteCopied.value = false;
+    }, 1800);
+  } catch {
+    inviteCopied.value = false;
+  }
 }
 
 async function createInvite() {
@@ -329,6 +361,7 @@ async function createInvite() {
   inviteMessage.value = '';
   inviteActionError.value = '';
   createdInviteCode.value = '';
+  inviteCopied.value = false;
   try {
     const response = await createAdminInvite({
       useLimit: inviteUseLimit.value,
@@ -339,6 +372,8 @@ async function createInvite() {
     invites.value.unshift(withoutInviteCode(response.invite));
     inviteMessage.value = '邀请码已创建，请在离开前复制它。';
     inviteUseLimit.value = 1;
+    inviteUsePreset.value = '1';
+    inviteExpiryPreset.value = '30d';
     inviteExpiresAt.value = '';
     inviteNote.value = '';
   } catch (cause) {
@@ -519,18 +554,39 @@ onMounted(() => {
         <div class="admin-form-grid admin-invite-fields">
           <div class="field">
             <label for="invite-use-limit">可使用次数</label>
+            <select id="invite-use-limit" v-model="inviteUsePreset" name="invite-use-limit">
+              <option value="1">1</option>
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="custom">自定义</option>
+            </select>
             <input
-              id="invite-use-limit"
+              v-if="inviteUsePreset === 'custom'"
+              id="invite-use-limit-custom"
               v-model.number="inviteUseLimit"
-              name="invite-use-limit"
+              name="invite-use-limit-custom"
               type="number"
               min="1"
               max="1000"
+              placeholder="输入次数"
             />
           </div>
           <div class="field">
-            <label for="invite-expires-at">过期时间（可选）</label>
+            <label for="invite-expires-preset">过期时间</label>
+            <select
+              id="invite-expires-preset"
+              v-model="inviteExpiryPreset"
+              name="invite-expires-preset"
+            >
+              <option value="24h">24 Hours</option>
+              <option value="7d">7 Days</option>
+              <option value="30d">30 Days</option>
+              <option value="365d">365 Days</option>
+              <option value="custom">自定义</option>
+            </select>
             <input
+              v-if="inviteExpiryPreset === 'custom'"
               id="invite-expires-at"
               v-model="inviteExpiresAt"
               name="invite-expires-at"
@@ -559,14 +615,27 @@ onMounted(() => {
           </button>
         </div>
       </form>
-      <p
+      <div
         v-if="createdInviteCode"
         data-state="invite-created"
         class="admin-secret-callout"
         role="status"
       >
-        本次邀请码（只显示一次）：<code>{{ createdInviteCode }}</code>
-      </p>
+        <span class="admin-secret-main"
+          >本次邀请码（只显示一次）：<code>{{ createdInviteCode }}</code></span
+        >
+        <button
+          class="copy-id-button"
+          type="button"
+          data-action="copy-invite"
+          :aria-label="inviteCopied ? '邀请码已复制' : '复制邀请码'"
+          @click="copyInviteCode"
+        >
+          <Check v-if="inviteCopied" :size="15" aria-hidden="true" />
+          <Copy v-else :size="15" aria-hidden="true" />
+          {{ inviteCopied ? '已复制' : '复制' }}
+        </button>
+      </div>
       <p v-if="inviteMessage" class="form-success" role="status">{{ inviteMessage }}</p>
       <p v-if="inviteActionError" class="form-error" role="alert">{{ inviteActionError }}</p>
       <div v-if="invitesLoading" class="admin-control-loading" role="status">正在加载邀请码…</div>
