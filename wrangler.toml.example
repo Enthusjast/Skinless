@@ -1,0 +1,38 @@
+name = "mc-skin-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Replace this placeholder with the ID returned by `wrangler d1 create mc-skin-db`.
+[[d1_databases]]
+binding = "DB"
+database_name = "mc-skin-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "mc-skins"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RateLimiterDurableObject"]
+
+[triggers]
+crons = ["0 3 * * *"]
+
+[vars]
+# These defaults are production-safe. `npm run dev` overrides the development
+# values through command-line vars and does not deploy them.
+ENVIRONMENT = "production"
+SKIN_DOMAIN = "localhost:8787"
+API_BASE_URL = "http://localhost:8787"
+TOKEN_EXPIRY_HOURS = "24"
+CORS_ORIGIN = "*"
+
+# Production secrets (keep PEM values out of this file):
+# wrangler secret put YGGDRASIL_PRIVATE_KEY_PEM --env production
+# wrangler secret put YGGDRASIL_PUBLIC_KEY_PEM --env production
