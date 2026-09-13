@@ -82,11 +82,11 @@ export async function sha256Hex(input: ArrayBuffer | ArrayBufferView): Promise<s
   return bytesToHex(new Uint8Array(digest));
 }
 
-export async function signRsaSha256(value: string, privateKeyPem: string): Promise<string> {
+export async function signRsaSha1(value: string, privateKeyPem: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'pkcs8',
     pemToBytes(privateKeyPem) as unknown as BufferSource,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-1' },
     false,
     ['sign'],
   );

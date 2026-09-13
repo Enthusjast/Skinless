@@ -44,6 +44,18 @@ function configuredSkinDomains(value: string | undefined): string[] {
   return value?.split(',').map((domain) => domain.trim()).filter(Boolean) ?? [];
 }
 
+function normalizePublicKeyPem(value: string): string {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^-----BEGIN ([^-]+)-----([\s\S]*?)-----END \1-----$/);
+  if (!match) return trimmed;
+
+  const body = match[2].replace(/\s/g, '');
+  if (!body) return trimmed;
+  const lines = body.match(/.{1,64}/g);
+  if (!lines) return trimmed;
+  return `-----BEGIN ${match[1]}-----\n${lines.join('\n')}\n-----END ${match[1]}-----`;
+}
+
 export function getPublicBaseUrl(c: Context<AppEnv>): string {
   const configured = c.env.API_BASE_URL?.trim();
   if (configured) {
@@ -97,7 +109,7 @@ export function getYggdrasilPrivateKeyPem(bindings: Bindings): string | null {
 
 export function getYggdrasilPublicKeyPem(bindings: Bindings): string | null {
   const key = (bindings.YGGDRASIL_PUBLIC_KEY_PEM ?? bindings.YGGDRASIL_PUBLIC_KEY)?.trim();
-  return key || null;
+  return key ? normalizePublicKeyPem(key) : null;
 }
 
 export function allowUnsignedTextures(bindings: Bindings): boolean {

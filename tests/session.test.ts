@@ -75,7 +75,7 @@ describe('Yggdrasil session and texture API', () => {
     const publicKey = await crypto.subtle.importKey(
       'spki',
       publicKeyBytes,
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-1' },
       false,
       ['verify'],
     );

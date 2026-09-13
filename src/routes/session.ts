@@ -11,7 +11,7 @@ import {
 } from '../db/queries';
 import { allowUnsignedTextures, getPublicBaseUrl, getYggdrasilPrivateKeyPem } from '../utils/config';
 import { readJson, yggError } from '../utils/errors';
-import { signRsaSha256 } from '../utils/crypto';
+import { signRsaSha1 } from '../utils/crypto';
 import { createTexturesProperty } from '../utils/textures';
 import { isProfileId } from '../utils/uuid';
 import { getClientKey } from '../middleware/ratelimit';
@@ -39,7 +39,7 @@ async function profileResponse(c: Context<AppEnv>, profile: ProfileRecord): Prom
   });
   if (property) {
     const privateKey = getYggdrasilPrivateKeyPem(c.env);
-    if (privateKey) property.signature = await signRsaSha256(property.value, privateKey);
+    if (privateKey) property.signature = await signRsaSha1(property.value, privateKey);
     else if (!allowUnsignedTextures(c.env)) throw new Error('Yggdrasil texture signing key is not configured.');
   }
   return c.json({

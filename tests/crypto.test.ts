@@ -3,7 +3,7 @@ import {
   hashPassword,
   sha256Hex,
   signHmac,
-  signRsaSha256,
+  signRsaSha1,
   verifyHmac,
   verifyPassword,
 } from '../src/utils/crypto';
@@ -38,11 +38,18 @@ describe('crypto utilities', () => {
 
   it('signs the exact texture property value with the configured RSA key', async () => {
     const value = 'eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vc2tpbi5leGFtcGxlL3RleHR1cmVzL2hhc2gifX19';
-    const signature = await signRsaSha256(value, YGGDRASIL_PRIVATE_KEY_PEM);
+    const signature = await signRsaSha1(value, YGGDRASIL_PRIVATE_KEY_PEM);
     const publicKeyBytes = Uint8Array.from(atob(
       YGGDRASIL_PUBLIC_KEY_PEM.replace(/-----[^-]+-----/g, '').replace(/\s/g, ''),
     ), (character) => character.charCodeAt(0));
-    const publicKey = await crypto.subtle.importKey(
+    const sha1PublicKey = await crypto.subtle.importKey(
+      'spki',
+      publicKeyBytes,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-1' },
+      false,
+      ['verify'],
+    );
+    const sha256PublicKey = await crypto.subtle.importKey(
       'spki',
       publicKeyBytes,
       { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
@@ -53,13 +60,19 @@ describe('crypto utilities', () => {
 
     await expect(crypto.subtle.verify(
       'RSASSA-PKCS1-v1_5',
-      publicKey,
+      sha1PublicKey,
       signatureBytes,
       new TextEncoder().encode(value),
     )).resolves.toBe(true);
     await expect(crypto.subtle.verify(
       'RSASSA-PKCS1-v1_5',
-      publicKey,
+      sha256PublicKey,
+      signatureBytes,
+      new TextEncoder().encode(value),
+    )).resolves.toBe(false);
+    await expect(crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      sha1PublicKey,
       signatureBytes,
       new TextEncoder().encode(value + 'tampered'),
     )).resolves.toBe(false);

@@ -172,6 +172,17 @@ describe('Yggdrasil authentication API', () => {
     });
   });
 
+  it('normalizes compact public keys for strict launcher PEM parsers', async () => {
+    const { env } = await createEnv();
+    env.YGGDRASIL_PUBLIC_KEY_PEM = YGGDRASIL_PUBLIC_KEY_PEM.replace(/\r?\n/g, '');
+    const response = await app.request('/api/yggdrasil/', {}, env);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      signaturePublickey: YGGDRASIL_PUBLIC_KEY_PEM,
+    });
+  });
+
   it('serves only the configured public key through public-key discovery', async () => {
     const { env } = await createEnv();
     const response = await app.request('/api/publickeys', {}, env);
