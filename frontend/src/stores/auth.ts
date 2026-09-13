@@ -8,6 +8,7 @@ import {
   deleteProfile,
   getProfiles,
   getUserProfile,
+  importOfficialProfile,
   login as loginWithCookies,
   logout as logoutWithCookies,
   renameProfile,
@@ -171,6 +172,13 @@ export const useAuthStore = defineStore('auth', {
       if (!this.user) throw new Error('Not authenticated');
       const result = await createProfile(name);
       this.applyProfileCollection(result);
+      return result.profile;
+    },
+    async importOfficialProfile(username: string, profileId?: string) {
+      if (!this.user) throw new Error('Not authenticated');
+      const result = await importOfficialProfile(username, profileId);
+      this.applyProfileCollection(result);
+      if (this.user.profile.id === result.profile.id) this.user.profile = result.profile;
       return result.profile;
     },
     async renameProfile(profileId: string, name: string) {

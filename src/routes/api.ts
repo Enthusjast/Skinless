@@ -20,6 +20,7 @@ import {
   findRegistrationInviteById,
   findSiteSettings,
   insertProfileBelowLimit,
+  insertProfileWithAssetsBelowLimit,
   insertRegistrationInvite,
   insertTextureBelowLimit,
   insertWebSession,
@@ -40,6 +41,7 @@ import {
   rotateWebSession,
   updatePassword,
   updateProfileName,
+  updateProfileFromOfficial,
   updateProfileAsset,
   updateProfileAssetIfTextureExists,
   updateSiteSettings,
@@ -82,6 +84,11 @@ import {
 } from '../utils/serializers';
 import { normalizePng, type AssetKind } from '../utils/png';
 import { generateProfileId, generateUserId } from '../utils/uuid';
+import {
+  fetchOfficialTexture,
+  lookupOfficialProfile,
+  OfficialProfileError,
+} from '../utils/official-profile';
 import {
   getPublicBaseUrl,
   getTextureUrl,
@@ -151,6 +158,10 @@ interface AdminStatusInput {
 
 interface ProfileNameInput {
   name?: unknown;
+}
+
+interface OfficialProfileImportInput {
+  username?: unknown;
 }
 
 interface WardrobeApplyInput {
@@ -223,6 +234,108 @@ async function profilePayload(c: Context<AppEnv>, profile: ProfileRecord, user =
     profile: serializeProfile(profile),
     ...(await profileCollection(c, user.id)),
   };
+}
+
+function officialImportError(c: Context<AppEnv>, cause: unknown): Response {
+  if (cause instanceof OfficialProfileError) {
+    const status = cause.code === 'not_found' ? 404 : cause.code === 'invalid_username' ? 400 : 502;
+    return jsonError(c, status, cause.message, status === 400 ? 'IllegalArgumentException' : 'BadGateway', `official_profile_${cause.code}`);
+  }
+  return jsonError(c, 502, 'The official Minecraft profile service is unavailable.', 'BadGateway', 'official_profile_unavailable');
+}
+
+async function importOfficialProfile(
+  c: Context<AppEnv>,
+  targetProfileId: string | undefined,
+): Promise<Response> {
+  const body = await readJson<OfficialProfileImportInput>(c);
+  const username = asString(body?.username);
+  if (!username) return jsonError(c, 400, 'username is required.', 'IllegalArgumentException', 'invalid_username');
+
+  const target = targetProfileId ? await ownedProfile(c, targetProfileId) : null;
+  if (targetProfileId && !target) return profileNotFound(c);
+
+  const user = c.get('user');
+  if (!target && await countProfilesByUserId(c.env.DB, user.id) >= MAX_PROFILES_PER_USER) {
+    return profileLimitReached(c);
+  }
+
+  let official;
+  try {
+    official = await lookupOfficialProfile(username);
+  } catch (cause) {
+    return officialImportError(c, cause);
+  }
+
+  const existingName = await findProfileByName(c.env.DB, official.name);
+  if (existingName && existingName.id !== target?.id) return profileNameConflict(c);
+
+  let skinBytes: Uint8Array;
+  let capeBytes: Uint8Array | null = null;
+  try {
+    const skinSource = await fetchOfficialTexture(official.skinUrl);
+    const normalizedSkin = await normalizePng(skinSource, 'skin');
+    if (!normalizedSkin.ok) throw new OfficialProfileError('invalid_profile', normalizedSkin.reason);
+    skinBytes = normalizedSkin.bytes;
+
+    if (official.capeUrl) {
+      const capeSource = await fetchOfficialTexture(official.capeUrl);
+      const normalizedCape = await normalizePng(capeSource, 'cape');
+      if (!normalizedCape.ok) throw new OfficialProfileError('invalid_profile', normalizedCape.reason);
+      capeBytes = normalizedCape.bytes;
+    }
+  } catch (cause) {
+    return officialImportError(c, cause);
+  }
+
+  const skinHash = await sha256Hex(skinBytes);
+  const capeHash = capeBytes ? await sha256Hex(capeBytes) : null;
+  const hashes = [skinHash, capeHash].filter((hash): hash is string => Boolean(hash));
+  for (const [hash, bytes] of [[skinHash, skinBytes] as const, ...(capeHash && capeBytes ? [[capeHash, capeBytes] as const] : [])]) {
+    if (!await c.env.BUCKET.head(`${hash}.png`)) await putTextureObject(c.env.BUCKET, `${hash}.png`, bytes);
+  }
+
+  const importedProfile: ProfileRecord = {
+    id: target?.id ?? generateProfileId(),
+    user_id: user.id,
+    name: official.name,
+    skin_hash: skinHash,
+    cape_hash: capeHash,
+    skin_model: official.model,
+    created_at: target?.created_at ?? Date.now(),
+    updated_at: Date.now(),
+  };
+  const previousHashes = target ? [target.skin_hash, target.cape_hash] : [];
+
+  try {
+    if (target) {
+      const updated = await updateProfileFromOfficial(c.env.DB, importedProfile, user.id);
+      if (!updated) {
+        await Promise.all(hashes.map((hash) => scheduleIfUnreferenced(c, hash)));
+        return profileNotFound(c);
+      }
+      importedProfile.updated_at = updated.updated_at;
+    } else if (!await insertProfileWithAssetsBelowLimit(c.env.DB, importedProfile, MAX_PROFILES_PER_USER)) {
+      await Promise.all(hashes.map((hash) => scheduleIfUnreferenced(c, hash)));
+      return profileLimitReached(c);
+    }
+  } catch (cause) {
+    await Promise.all(hashes.map((hash) => scheduleIfUnreferenced(c, hash)));
+    if (isConstraintViolation(cause)) return profileNameConflict(c);
+    throw cause;
+  }
+
+  await Promise.all(hashes.map((hash) => cancelTextureCleanupIfReferenced(c.env.DB, hash)));
+  await Promise.all(
+    previousHashes
+      .filter((hash): hash is string => hash !== null && !hashes.includes(hash))
+      .map((hash) => scheduleIfUnreferenced(c, hash)),
+  );
+
+  return c.json(
+    { profile: serializeProfile(importedProfile), ...(await profileCollection(c, user.id)) },
+    target ? 200 : 201,
+  );
 }
 
 function skinModel(value: unknown): SkinModel | null {
@@ -968,6 +1081,9 @@ routes.post('/user/profiles', authMiddleware, async (c) => {
   }
   return c.json(await profilePayload(c, profile), 201);
 });
+
+routes.post('/user/profiles/import', authMiddleware, (c) => importOfficialProfile(c, undefined));
+routes.post('/user/profiles/:id/import', authMiddleware, (c) => importOfficialProfile(c, c.req.param('id')));
 
 async function renameProfile(c: Context<AppEnv>): Promise<Response> {
   const profile = await ownedProfile(c, c.req.param('id'));

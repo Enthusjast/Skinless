@@ -220,6 +220,12 @@ export function formatApiError(cause: unknown, fallback: string): string {
     unauthorized: '登录状态已失效，请重新登录。',
     Forbidden: '没有权限完成此操作。',
     TooManyRequests: '尝试次数过多，请稍后再试。',
+    official_profile_invalid_username: '请输入 3–16 位字母、数字或下划线组成的正版用户名。',
+    official_profile_not_found: '找不到该正版用户名，请检查拼写。',
+    official_profile_unavailable: '正版资料服务暂时不可用，请稍后重试。',
+    official_profile_invalid_profile: '正版资料或纹理无效，暂时无法导入。',
+    profile_name_taken: '该游戏名已经被其他 Profile 使用。',
+    profile_limit_reached: 'Profile 数量已达到上限。',
   };
   return messages[cause.code ?? ''] ?? redactCredentialText(cause.message);
 }
@@ -510,6 +516,18 @@ export function createProfile(name: string): Promise<{ profile: ApiProfile } & P
     method: 'POST',
     body: JSON.stringify({ name }),
   });
+}
+
+export function importOfficialProfile(
+  username: string,
+  profileId?: string,
+): Promise<{ profile: ApiProfile } & ProfileCollection> {
+  return managementRequest<{ profile: ApiProfile } & ProfileCollection>(
+    profileId
+      ? `/api/user/profiles/${encodeURIComponent(profileId)}/import`
+      : '/api/user/profiles/import',
+    { method: 'POST', body: JSON.stringify({ username }) },
+  );
 }
 
 export function renameProfile(

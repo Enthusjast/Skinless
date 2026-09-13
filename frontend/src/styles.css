@@ -1284,6 +1284,48 @@ h3 {
 .profile-inline-form {
   grid-column: 1 / -1;
 }
+.profile-import-form {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.profile-import-form input {
+  min-width: min(220px, 100%);
+  min-height: 38px;
+  flex: 1;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.profile-import-form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus);
+  outline: none;
+}
+.profile-import-create-form {
+  align-items: end;
+  margin-top: 12px;
+  padding: 18px 0 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+.profile-import-create-form .field {
+  flex: 1;
+  margin-top: 0;
+}
+.profile-import-create-form .field small {
+  color: var(--muted);
+}
 .profile-inline-form input {
   width: min(220px, 100%);
   min-height: 38px;

@@ -336,6 +336,35 @@ export async function insertProfileBelowLimit(
   return (result.meta?.changes ?? 1) > 0;
 }
 
+export async function insertProfileWithAssetsBelowLimit(
+  db: D1Database,
+  profile: ProfileRecord,
+  limit = MAX_PROFILES_PER_USER,
+): Promise<boolean> {
+  const timestamp = Date.now();
+  const result = await db
+    .prepare(
+      `INSERT INTO profiles
+       (id, user_id, name, skin_hash, cape_hash, skin_model, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM profiles WHERE user_id = ?) < ?`,
+    )
+    .bind(
+      profile.id,
+      profile.user_id,
+      profile.name,
+      profile.skin_hash,
+      profile.cape_hash,
+      profile.skin_model,
+      profile.created_at ?? timestamp,
+      profile.updated_at ?? timestamp,
+      profile.user_id,
+      limit,
+    )
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
 export async function updateProfileName(
   db: D1Database,
   profileId: string,
@@ -346,6 +375,32 @@ export async function updateProfileName(
     .prepare("UPDATE profiles SET name = ?, updated_at = ? WHERE id = ?")
     .bind(name, updatedAt, profileId)
     .run();
+}
+
+export async function updateProfileFromOfficial(
+  db: D1Database,
+  profile: ProfileRecord,
+  userId: string,
+): Promise<ProfileRecord | null> {
+  const updatedAt = Date.now();
+  const result = await db
+    .prepare(
+      `UPDATE profiles
+       SET name = ?, skin_hash = ?, cape_hash = ?, skin_model = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(
+      profile.name,
+      profile.skin_hash,
+      profile.cape_hash,
+      profile.skin_model,
+      updatedAt,
+      profile.id,
+      userId,
+    )
+    .run();
+  if ((result.meta?.changes ?? 0) === 0) return null;
+  return findProfileByIdForUser(db, profile.id, userId);
 }
 
 export async function setDefaultProfile(

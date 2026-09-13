@@ -65,4 +65,67 @@ describe('ProfileManagement', () => {
     expect(wrapper.get('[data-profile-id="profile-1"]').attributes('aria-pressed')).toBe('false');
     expect(wrapper.get('[data-profile-id="profile-2"]').attributes('aria-pressed')).toBe('true');
   });
+
+  it('overwrites an existing profile with an imported official account', async () => {
+    const importedProfile = { ...secondProfile, name: 'Notch', skinHash: 'official-skin' };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          profile: importedProfile,
+          profiles: [firstProfile, importedProfile],
+          defaultProfileId: firstProfile.id,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const wrapper = mount(ProfileManagement);
+    const secondProfileCard = wrapper.findAll('.profile-management-item')[1];
+    expect(secondProfileCard).toBeDefined();
+    const importButton = secondProfileCard
+      .findAll('button')
+      .find((button) => button.text().includes('导入正版'));
+    await importButton?.trigger('click');
+    await wrapper.get('#import-profile-2').setValue('Notch');
+    await wrapper.get('form.profile-import-form').trigger('submit');
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/user/profiles/profile-2/import',
+      expect.objectContaining({ body: JSON.stringify({ username: 'Notch' }) }),
+    );
+    expect(wrapper.text()).toContain('已将正版账号 Notch 导入到该 Profile');
+  });
+
+  it('adds a new profile when importing from the create section', async () => {
+    const importedProfile = {
+      ...firstProfile,
+      id: 'profile-3',
+      name: 'Alex',
+      skinHash: 'official-skin',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          profile: importedProfile,
+          profiles: [firstProfile, secondProfile, importedProfile],
+          defaultProfileId: firstProfile.id,
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const wrapper = mount(ProfileManagement);
+    await wrapper.get('#official-profile-name').setValue('Alex');
+    await wrapper.get('form.profile-import-create-form').trigger('submit');
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/user/profiles/import',
+      expect.objectContaining({ body: JSON.stringify({ username: 'Alex' }) }),
+    );
+    expect(wrapper.text()).toContain('已添加正版账号 Alex');
+  });
 });
