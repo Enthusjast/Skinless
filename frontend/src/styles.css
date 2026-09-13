@@ -1448,13 +1448,11 @@ h3 {
   padding: 24px;
 }
 .setup-version,
-.setup-profile-state,
-.setup-check-summary {
+.setup-profile-state {
   color: var(--muted);
   font-size: 0.74rem;
 }
-.setup-profile-state,
-.setup-check-summary {
+.setup-profile-state {
   padding-top: 5px;
 }
 .setup-profile-state.is-good {
@@ -1464,8 +1462,7 @@ h3 {
   color: var(--warning);
 }
 .setup-copy-list,
-.setup-profile-grid,
-.setup-check-list {
+.setup-profile-grid {
   display: grid;
   gap: 10px;
   margin-top: 20px;
@@ -1481,9 +1478,6 @@ h3 {
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-}
-.setup-copy-row-multiline {
-  align-items: start;
 }
 .setup-copy-value {
   display: grid;
@@ -1505,12 +1499,6 @@ h3 {
     monospace;
   overflow-wrap: anywhere;
 }
-.setup-copy-text {
-  margin: 0;
-  color: var(--text-soft);
-  font-size: 0.8rem;
-  line-height: 1.6;
-}
 .setup-copy-feedback {
   grid-column: 1 / -1;
   color: var(--success);
@@ -1518,51 +1506,6 @@ h3 {
 }
 .setup-copy-feedback.is-failure {
   color: var(--danger);
-}
-.setup-check-row {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 12px;
-  padding: 14px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.setup-check-icon {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: 50%;
-}
-.setup-check-row.is-success .setup-check-icon {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 11%, transparent);
-}
-.setup-check-row.is-warning .setup-check-icon {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 11%, transparent);
-}
-.setup-check-row.is-failure .setup-check-icon {
-  color: var(--danger);
-  background: var(--danger-surface);
-}
-.setup-check-row strong {
-  color: var(--text);
-  font-size: 0.84rem;
-}
-.setup-check-row p {
-  margin: 3px 0 0;
-  color: var(--muted);
-  font-size: 0.76rem;
-}
-.setup-check-row small {
-  display: block;
-  margin-top: 7px;
-  color: var(--text-soft);
-  font-size: 0.72rem;
-  line-height: 1.5;
 }
 .setup-state {
   display: grid;

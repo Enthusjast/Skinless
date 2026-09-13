@@ -61,7 +61,7 @@ describe('SetupView', () => {
     await flushPromises();
 
     expect(wrapper.get('[data-state="ready"]')).toBeTruthy();
-    expect(wrapper.text()).toContain('元信息端点');
+    expect(wrapper.text()).toContain('认证服务器地址');
     expect(wrapper.text()).toContain('PlayerOne');
   });
 
@@ -72,14 +72,6 @@ describe('SetupView', () => {
     const copyCases = [
       ['auth-server', diagnostics.authServerUrl],
       ['java-agent', diagnostics.javaAgentArgument],
-      [
-        'launcher-steps',
-        '启动器：选择“外置登录（Authlib Injector）”，认证服务器填写上面的地址，再使用 Skinless 注册邮箱和密码登录。',
-      ],
-      [
-        'server-steps',
-        `服务端：将 -javaagent:authlib-injector.jar=${diagnostics.authServerUrl} 加入 Java 启动参数，并在 server.properties 中设置 online-mode=false。`,
-      ],
       ['profile-id', diagnostics.profile.id],
       ['profile-name', diagnostics.profile.name],
       ['profile-texture', diagnostics.profile.textureUrl],
@@ -114,7 +106,7 @@ describe('SetupView', () => {
     expect(wrapper.get('[data-copy-feedback="profile-texture"]').text()).toContain('复制失败');
   });
 
-  it('separates required failures from repairable warnings', async () => {
+  it('does not render the deployment checks or setup instruction paragraphs', async () => {
     getDiagnostics.mockResolvedValueOnce({
       ...diagnostics,
       metadataReachable: false,
@@ -126,9 +118,10 @@ describe('SetupView', () => {
     const wrapper = mount(SetupView);
     await flushPromises();
 
-    expect(wrapper.findAll('.setup-check-row.is-failure')).toHaveLength(2);
-    expect(wrapper.findAll('.setup-check-row.is-warning').length).toBeGreaterThan(2);
-    expect(wrapper.text()).toContain('确认 Worker 已部署');
-    expect(wrapper.text()).toContain('让前端与 API 使用同一域名');
+    expect(wrapper.find('#setup-check-title').exists()).toBe(false);
+    expect(wrapper.findAll('.setup-check-row')).toHaveLength(0);
+    expect(wrapper.text()).not.toContain('部署检查');
+    expect(wrapper.text()).not.toContain('启动器：选择');
+    expect(wrapper.text()).not.toContain('服务端：将');
   });
 });
