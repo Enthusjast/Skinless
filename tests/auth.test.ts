@@ -3,6 +3,7 @@ import { app } from '../src/index';
 import { hashPassword } from '../src/utils/crypto';
 import { clearLoginFailures } from '../src/middleware/ratelimit';
 import { createTestRateLimiterNamespace } from './fixtures/rate-limiter';
+import { YGGDRASIL_PRIVATE_KEY_PEM, YGGDRASIL_PUBLIC_KEY_PEM } from './fixtures/yggdrasil-keys';
 import type { ProfileRecord, TokenRecord, UserRecord } from '../src/types';
 
 type Row = Record<string, unknown>;
@@ -149,6 +150,8 @@ async function createEnv(): Promise<{ db: FakeD1; env: Record<string, unknown> }
       RATE_LIMITER: createTestRateLimiterNamespace(),
       API_BASE_URL: 'https://skin.example.com',
       SKIN_DOMAIN: 'skin.example.com',
+      YGGDRASIL_PRIVATE_KEY_PEM,
+      YGGDRASIL_PUBLIC_KEY_PEM,
     },
   };
 }
@@ -165,7 +168,18 @@ describe('Yggdrasil authentication API', () => {
     await expect(response.json()).resolves.toMatchObject({
       meta: { implementationName: 'cf-yggdrasil' },
       skinDomains: ['skin.example.com'],
+      signaturePublickey: YGGDRASIL_PUBLIC_KEY_PEM,
     });
+  });
+
+  it('serves only the configured public key through public-key discovery', async () => {
+    const { env } = await createEnv();
+    const response = await app.request('/api/publickeys', {}, env);
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ yggdrasil: YGGDRASIL_PUBLIC_KEY_PEM });
+    expect(body).not.toContain(YGGDRASIL_PRIVATE_KEY_PEM);
   });
 
   it('authenticates, validates, rotates, and invalidates a token', async () => {

@@ -6,6 +6,28 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+
+  return btoa(binary);
+}
+
+function pemToBytes(pem: string): Uint8Array {
+  const encoded = pem
+    .replace(/-----BEGIN [^-]+-----/g, '')
+    .replace(/-----END [^-]+-----/g, '')
+    .replace(/\s/g, '');
+  if (!encoded || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    throw new Error('Invalid PEM key.');
+  }
+  return Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+}
+
 export async function hashPassword(
   password: string,
   salt: string,
@@ -58,6 +80,22 @@ export async function sha256Hex(input: ArrayBuffer | ArrayBufferView): Promise<s
     : new Uint8Array(input.buffer as ArrayBuffer, input.byteOffset, input.byteLength);
   const digest = await crypto.subtle.digest('SHA-256', data as unknown as BufferSource);
   return bytesToHex(new Uint8Array(digest));
+}
+
+export async function signRsaSha256(value: string, privateKeyPem: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToBytes(privateKeyPem) as unknown as BufferSource,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    encoder.encode(value),
+  );
+  return bytesToBase64(new Uint8Array(signature));
 }
 
 export function createSalt(): string {

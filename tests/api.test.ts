@@ -297,7 +297,14 @@ class MemoryBucket {
 async function registeredClient() {
   const db = new MemoryD1();
   const bucket = new MemoryBucket();
-  const env = { DB: db as unknown as D1Database, BUCKET: bucket as unknown as R2Bucket, API_BASE_URL: 'https://skin.example.com', SKIN_DOMAIN: 'skin.example.com' };
+  const env = {
+    DB: db as unknown as D1Database,
+    BUCKET: bucket as unknown as R2Bucket,
+    API_BASE_URL: 'https://skin.example.com',
+    SKIN_DOMAIN: 'skin.example.com',
+    ENVIRONMENT: 'development',
+    YGGDRASIL_ALLOW_UNSIGNED_TEXTURES: 'true',
+  };
   const user: UserRecord = {
     id: 'user-1',
     email: 'player@example.com',

@@ -6,6 +6,8 @@ import {
   parseRegistrationSettings,
   type RegistrationSettingsValues,
 } from '../src/utils/registration';
+import { allowUnsignedTextures } from '../src/utils/config';
+import type { Bindings } from '../src/types';
 
 const current: RegistrationSettingsValues = { ...DEFAULT_REGISTRATION_SETTINGS };
 
@@ -55,6 +57,20 @@ describe('registration settings validation', () => {
       ok: false,
       code: 'invalid_join_ip',
     });
+  });
+});
+
+describe('Yggdrasil signing configuration', () => {
+  it('allows unsigned textures only with an explicit local-development flag', () => {
+    expect(allowUnsignedTextures({
+      ENVIRONMENT: 'development',
+      YGGDRASIL_ALLOW_UNSIGNED_TEXTURES: 'true',
+    } as unknown as Bindings)).toBe(true);
+    expect(allowUnsignedTextures({
+      ENVIRONMENT: 'production',
+      YGGDRASIL_ALLOW_UNSIGNED_TEXTURES: 'true',
+    } as unknown as Bindings)).toBe(false);
+    expect(allowUnsignedTextures({ ENVIRONMENT: 'development' } as unknown as Bindings)).toBe(false);
   });
 });
 

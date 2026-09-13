@@ -17,6 +17,12 @@ export interface Bindings {
   CORS_ORIGIN?: string;
   SERVER_NAME?: string;
   IMPLEMENTATION_VERSION?: string;
+  ENVIRONMENT?: string;
+  YGGDRASIL_PRIVATE_KEY_PEM?: string;
+  YGGDRASIL_PUBLIC_KEY_PEM?: string;
+  YGGDRASIL_PRIVATE_KEY?: string;
+  YGGDRASIL_PUBLIC_KEY?: string;
+  YGGDRASIL_ALLOW_UNSIGNED_TEXTURES?: string;
   WEB_SESSION_SECRET?: string;
   RATE_LIMITER: DurableObjectNamespace;
   TURNSTILE_SECRET_KEY?: string;

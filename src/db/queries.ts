@@ -40,6 +40,7 @@ export interface ServerSessionRecord {
   user_id: string;
   created_at: number;
   expires_at: number;
+  ip?: string | null;
 }
 
 export interface WebSessionSummary {
@@ -183,6 +184,33 @@ export async function findProfileByName(
     .prepare("SELECT * FROM profiles WHERE name = ? COLLATE NOCASE LIMIT 1")
     .bind(name)
     .first<ProfileRecord>();
+}
+
+export async function findPublicProfileByName(
+  db: D1Database,
+  name: string,
+): Promise<ProfileRecord | null> {
+  return db
+    .prepare(
+      `SELECT * FROM profiles
+       WHERE name = ? COLLATE NOCASE
+         AND EXISTS (
+           SELECT 1 FROM users
+           WHERE users.id = profiles.user_id AND users.status = 'active'
+         )
+       LIMIT 1`,
+    )
+    .bind(name)
+    .first<ProfileRecord>();
+}
+
+export async function findPublicProfilesByNames(
+  db: D1Database,
+  names: string[],
+): Promise<ProfileRecord[]> {
+  const uniqueNames = [...new Set(names.map((name) => name.toLowerCase()))];
+  return (await Promise.all(uniqueNames.map((name) => findPublicProfileByName(db, name))))
+    .filter((profile): profile is ProfileRecord => profile !== null);
 }
 
 export async function findProfileByIdForUser(
@@ -986,6 +1014,7 @@ export async function findSiteSettings(
 ): Promise<SiteSettingsRecord | null> {
   return db
     .prepare("SELECT * FROM site_settings WHERE id = 1 LIMIT 1")
+    .bind()
     .first<SiteSettingsRecord>();
 }
 
@@ -1420,8 +1449,8 @@ export async function createServerSession(
 ): Promise<boolean> {
   const result = await db
     .prepare(
-      `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
-       SELECT ?, ?, ?, ?, ?
+      `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at, ip)
+       SELECT ?, ?, ?, ?, ?, ?
        WHERE EXISTS (
          SELECT 1 FROM users
          WHERE id = ? AND status = 'active'
@@ -1429,7 +1458,8 @@ export async function createServerSession(
        ON CONFLICT (server_id, profile_id) DO UPDATE SET
          user_id = excluded.user_id,
          created_at = excluded.created_at,
-         expires_at = excluded.expires_at`,
+         expires_at = excluded.expires_at,
+         ip = excluded.ip`,
     )
     .bind(
       session.server_id,
@@ -1437,6 +1467,7 @@ export async function createServerSession(
       session.user_id,
       session.created_at,
       session.expires_at,
+      session.ip ?? null,
       session.user_id,
     )
     .run();
@@ -1448,18 +1479,30 @@ export async function findJoinedProfile(
   serverId: string,
   profileName: string,
   now = Date.now(),
+  ip?: string,
 ): Promise<ProfileRecord | null> {
-  return db
-    .prepare(
-      `SELECT p.*
-       FROM server_sessions s
-       INNER JOIN profiles p ON p.id = s.profile_id
-       INNER JOIN users u ON u.id = s.user_id AND u.status = 'active'
-       WHERE s.server_id = ? AND p.name = ? AND s.expires_at > ?
-       LIMIT 1`,
-    )
-    .bind(serverId, profileName, now)
-    .first<ProfileRecord>();
+  const statement = ip === undefined
+    ? db
+        .prepare(
+          `SELECT p.*
+           FROM server_sessions s
+           INNER JOIN profiles p ON p.id = s.profile_id
+           INNER JOIN users u ON u.id = s.user_id AND u.status = 'active'
+           WHERE s.server_id = ? AND p.name = ? COLLATE NOCASE AND s.expires_at > ?
+           LIMIT 1`,
+        )
+        .bind(serverId, profileName, now)
+    : db
+        .prepare(
+          `SELECT p.*
+           FROM server_sessions s
+           INNER JOIN profiles p ON p.id = s.profile_id
+           INNER JOIN users u ON u.id = s.user_id AND u.status = 'active'
+           WHERE s.server_id = ? AND p.name = ? COLLATE NOCASE AND s.expires_at > ? AND s.ip = ?
+           LIMIT 1`,
+        )
+        .bind(serverId, profileName, now, ip);
+  return statement.first<ProfileRecord>();
 }
 
 export async function updatePassword(

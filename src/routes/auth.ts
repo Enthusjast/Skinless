@@ -20,7 +20,7 @@ import {
   recordLoginFailureDistributed,
 } from '../middleware/ratelimit';
 import { createAccessToken, verifyPassword } from '../utils/crypto';
-import { getTokenExpiryMs, metadata } from '../utils/config';
+import { getTokenExpiryMs, metadata, publicKeys } from '../utils/config';
 import { readJson, yggError } from '../utils/errors';
 import { turnstileTokenFromBody, verifyTurnstileToken } from '../utils/turnstile';
 import type { AppEnv, ProfileRecord, TokenRecord, UserRecord } from '../types';
@@ -47,6 +47,7 @@ interface ProfileSelection {
 const routes = new Hono<AppEnv>();
 
 routes.get('/', metadata);
+routes.get('/api/publickeys', publicKeys);
 
 function asNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;

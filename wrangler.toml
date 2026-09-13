@@ -29,3 +29,7 @@ SKIN_DOMAIN = "localhost:8787"
 API_BASE_URL = "http://localhost:8787"
 TOKEN_EXPIRY_HOURS = "24"
 CORS_ORIGIN = "*"
+
+# Production secrets (keep PEM values out of this file):
+# wrangler secret put YGGDRASIL_PRIVATE_KEY_PEM --env production
+# wrangler secret put YGGDRASIL_PUBLIC_KEY_PEM --env production
