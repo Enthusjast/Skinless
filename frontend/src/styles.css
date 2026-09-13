@@ -410,8 +410,9 @@ h3 {
   width: 28px;
   height: 28px;
   place-items: center;
-  color: var(--accent-ink);
-  background: var(--accent);
+  color: var(--accent);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
   border-radius: 9px;
   font-family: 'Press Start 2P', ui-monospace, monospace;
   font-size: 0.48rem;
@@ -758,8 +759,8 @@ h3 {
   place-items: center;
   margin-bottom: 18px;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 .feature-index {
@@ -1033,9 +1034,10 @@ h3 {
   background: var(--surface-hover);
 }
 .workspace-nav-link.active {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  box-shadow: inset 2px 0 var(--accent);
 }
 .workspace-sidebar-footer {
   display: flex;
@@ -1187,7 +1189,7 @@ h3 {
   padding: 24px;
   margin-bottom: 20px;
   background: var(--surface);
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
 }
@@ -1211,8 +1213,9 @@ h3 {
     background var(--motion);
 }
 .profile-management-item.selected {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  box-shadow: inset 2px 0 var(--accent);
 }
 .profile-card-button {
   display: flex;
@@ -1234,8 +1237,9 @@ h3 {
   height: 38px;
   flex: 0 0 auto;
   place-items: center;
-  color: var(--accent-ink);
-  background: var(--accent);
+  color: var(--accent);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   font-family: 'Press Start 2P', ui-monospace, monospace;
   font-size: 0.56rem;
@@ -1325,12 +1329,13 @@ h3 {
   width: 58px;
   height: 58px;
   place-items: center;
-  color: var(--accent-ink);
-  background: var(--accent);
+  color: var(--accent);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
   border-radius: 16px;
   font-family: 'Press Start 2P', ui-monospace, monospace;
   font-size: 0.85rem;
-  box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 11%, transparent);
+  box-shadow: var(--shadow-sm);
 }
 .profile-summary-meta {
   flex-wrap: wrap;
@@ -1614,8 +1619,8 @@ h3 {
   flex: 0 0 auto;
   place-items: center;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 .overview-asset-icon {
@@ -1783,7 +1788,7 @@ h3 {
   min-width: 76px;
   padding: 8px 10px;
   color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   font:
     0.68rem/1.2 ui-monospace,
@@ -2005,7 +2010,7 @@ h3 {
 }
 .model-choice label.selected {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: var(--surface-hover);
 }
 .model-choice input {
   accent-color: var(--accent);
@@ -2059,7 +2064,7 @@ h3 {
 }
 .dropzone:hover,
 .dropzone.dragging {
-  background: color-mix(in srgb, var(--accent) 9%, var(--bg-soft));
+  background: var(--surface-hover);
   border-color: var(--accent);
 }
 .dropzone:disabled {
@@ -2073,7 +2078,8 @@ h3 {
   flex: 0 0 auto;
   place-items: center;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 .upload-thumb {
@@ -2930,7 +2936,8 @@ td select {
   grid-row: span 2;
   place-items: center;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 .stat-card strong {
