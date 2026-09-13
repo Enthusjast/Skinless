@@ -869,6 +869,14 @@ h3 {
   color: var(--accent);
   font-size: 0.86rem;
 }
+.auth-links {
+  display: grid;
+  gap: 2px;
+  margin-top: 14px;
+}
+.auth-links .auth-link {
+  margin-top: 0;
+}
 .registration-actions {
   display: flex;
   flex-wrap: wrap;

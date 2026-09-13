@@ -25,7 +25,6 @@ const fieldError = reactive({
 });
 const busy = ref(false);
 const resendBusy = ref(false);
-const expiresAt = ref(0);
 const resendAt = ref(0);
 const clock = ref(Date.now());
 const showPassword = ref(false);
@@ -36,10 +35,6 @@ let countdownTimer: ReturnType<typeof setInterval> | undefined;
 const resendRemaining = computed(() =>
   Math.max(0, Math.ceil((resendAt.value - clock.value) / 1000)),
 );
-const codeRemaining = computed(() =>
-  Math.max(0, Math.ceil((expiresAt.value - clock.value) / 1000)),
-);
-
 function clearFeedback() {
   error.value = '';
   success.value = '';
@@ -103,10 +98,8 @@ async function submitDetails() {
     );
     challengeId.value = response.challengeId;
     code.value = '';
-    expiresAt.value = response.expiresAt;
     resendAt.value = response.resendAfter;
     step.value = 'verify';
-    success.value = '验证码已发送到你的邮箱，请在 10 分钟内完成验证。';
     await nextTick();
     codeInput.value?.focus();
   } catch (cause) {
@@ -140,7 +133,6 @@ async function resendCode() {
   resendBusy.value = true;
   try {
     const response = await auth.registerResend(challengeId.value);
-    expiresAt.value = response.expiresAt;
     resendAt.value = response.resendAfter;
     code.value = '';
     success.value = '新的验证码已发送。';
@@ -313,14 +305,9 @@ onUnmounted(() => {
             maxlength="6"
             placeholder="000000"
             :aria-invalid="Boolean(fieldError.code)"
-            :aria-describedby="
-              fieldError.code ? 'verification-code-error' : 'verification-code-help'
-            "
+            :aria-describedby="fieldError.code ? 'verification-code-error' : undefined"
             required
           />
-          <small id="verification-code-help"
-            >验证码剩余 {{ Math.ceil(codeRemaining / 60000) }} 分钟有效</small
-          >
           <small v-if="fieldError.code" id="verification-code-error" class="form-error">{{
             fieldError.code
           }}</small>

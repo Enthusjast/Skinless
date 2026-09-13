@@ -93,9 +93,10 @@ async function submit() {
           <LockKeyhole :size="17" aria-hidden="true" />{{ auth.loading ? '登录中…' : '登录' }}
         </button>
       </form>
-      <RouterLink to="/forgot-password" class="auth-link">忘记密码？通过邮箱重置</RouterLink>
-      <RouterLink to="/restore-account" class="auth-link">恢复待删除账号</RouterLink>
-      <RouterLink to="/register" class="auth-link">还没有账号？立即注册</RouterLink>
+      <div class="auth-links">
+        <RouterLink to="/forgot-password" class="auth-link">忘记密码 ?</RouterLink>
+        <RouterLink to="/register" class="auth-link">还没有账户 ? 立即注册</RouterLink>
+      </div>
     </section>
   </section>
 </template>
