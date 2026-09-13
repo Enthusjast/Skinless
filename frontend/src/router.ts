@@ -53,6 +53,24 @@ const router = createRouter({
           },
         },
         {
+          path: 'dashboard/appearance',
+          component: () => import('./views/AppearanceView.vue'),
+          meta: {
+            title: '角色外观',
+            eyebrow: 'CHARACTER APPEARANCE',
+            description: '管理 Profile、模型和皮肤纹理。',
+          },
+        },
+        {
+          path: 'dashboard/security',
+          component: () => import('./views/SecurityView.vue'),
+          meta: {
+            title: '账户安全',
+            eyebrow: 'ACCOUNT SECURITY',
+            description: '管理密码、邮箱、会话和账号生命周期。',
+          },
+        },
+        {
           path: 'dashboard/wardrobe',
           component: () => import('./views/WardrobeView.vue'),
           meta: {
@@ -90,6 +108,12 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
   await auth.initialize();
+  if (to.path === '/dashboard' && to.hash === '#appearance') {
+    return { path: '/dashboard/appearance', query: to.query };
+  }
+  if (to.path === '/dashboard' && to.hash === '#security') {
+    return { path: '/dashboard/security', query: to.query };
+  }
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { path: '/login', query: { redirect: to.fullPath } };
   }

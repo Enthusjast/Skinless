@@ -17,6 +17,8 @@ describe('WorkspaceLayout navigation', () => {
       routes: [
         { path: '/', component: defineComponent({ template: '<div />' }) },
         { path: '/dashboard', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/appearance', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/security', component: defineComponent({ template: '<div />' }) },
         { path: '/dashboard/wardrobe', component: defineComponent({ template: '<div />' }) },
         { path: '/dashboard/setup', component: defineComponent({ template: '<div />' }) },
         { path: '/admin', component: defineComponent({ template: '<div />' }) },
@@ -59,12 +61,57 @@ describe('WorkspaceLayout navigation', () => {
     wrapper.unmount();
   });
 
+  it('highlights dedicated appearance and security routes', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/appearance', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/security', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/wardrobe', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/setup', component: defineComponent({ template: '<div />' }) },
+      ],
+    });
+    await router.push('/dashboard/security');
+    await router.isReady();
+
+    const auth = useAuthStore();
+    auth.user = {
+      id: 'user-1',
+      email: 'player@example.com',
+      role: 'user',
+      createdAt: 1,
+      updatedAt: 1,
+      profile: {
+        id: 'profile-1',
+        name: 'PlayerOne',
+        skinHash: null,
+        capeHash: null,
+        skinModel: 'classic',
+      },
+    };
+
+    const wrapper = mount(WorkspaceLayout, {
+      global: {
+        plugins: [router],
+        stubs: { PageHeader: true, ThemeToggle: true, RouterView: true },
+      },
+    });
+
+    expect(wrapper.get('a[href="/dashboard/appearance"]').classes()).not.toContain('active');
+    expect(wrapper.get('a[href="/dashboard/security"]').classes()).toContain('active');
+    wrapper.unmount();
+  });
+
   it('returns focus when closing the account menu or mobile sidebar with Escape', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
         { path: '/', component: defineComponent({ template: '<div />' }) },
         { path: '/dashboard', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/appearance', component: defineComponent({ template: '<div />' }) },
+        { path: '/dashboard/security', component: defineComponent({ template: '<div />' }) },
         { path: '/dashboard/wardrobe', component: defineComponent({ template: '<div />' }) },
         { path: '/dashboard/setup', component: defineComponent({ template: '<div />' }) },
       ],

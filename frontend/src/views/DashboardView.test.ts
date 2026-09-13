@@ -5,42 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '../stores/auth';
 import DashboardView from './DashboardView.vue';
 
-vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
-
 const UiCardStub = defineComponent({
   template: '<div><slot /></div>',
 });
 
-const SkinUploaderStub = defineComponent({
-  name: 'SkinUploader',
-  props: {
-    asset: { type: String, required: true },
-    currentHash: { type: String, default: null },
-    model: { type: String, required: true },
-  },
-  emits: ['preview', 'updated'],
-  template:
-    '<button class="uploader-stub" :data-asset="asset" type="button" @click="$emit(\'preview\', `blob:${asset}`)">{{ asset }}</button>',
-});
-
-const SkinPreviewStub = defineComponent({
-  name: 'SkinPreview',
-  props: {
-    skinHash: { type: String, default: null },
-    capeHash: { type: String, default: null },
-    skinPreviewUrl: { type: String, default: null },
-    capePreviewUrl: { type: String, default: null },
-    model: { type: String, required: true },
-  },
-  template:
-    '<div class="preview-stub" :data-skin-hash="skinHash || \'\'" :data-skin-preview="skinPreviewUrl || \'\'" :data-cape-preview="capePreviewUrl || \'\'" />',
-});
-
-const ProfileManagementStub = defineComponent({
-  name: 'ProfileManagement',
-  template: '<div class="profile-management-stub" />',
+const RouterLinkStub = defineComponent({
+  props: { to: { type: [String, Object], required: true } },
+  template: '<a :href="typeof to === \'string\' ? to : String(to.path)"><slot /></a>',
 });
 
 beforeEach(() => {
@@ -68,36 +39,32 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('DashboardView preview wiring', () => {
-  it('shows a selected preview immediately and restores the saved hash when cleared', async () => {
-    const wrapper = mount(DashboardView, {
-      global: {
-        stubs: {
-          UiCard: UiCardStub,
-          SkinUploader: SkinUploaderStub,
-          SkinPreview: SkinPreviewStub,
-          ProfileManagement: ProfileManagementStub,
-          SessionManagement: true,
-        },
+function mountDashboard() {
+  return mount(DashboardView, {
+    global: {
+      stubs: {
+        UiCard: UiCardStub,
+        RouterLink: RouterLinkStub,
       },
-    });
-    const uploader = wrapper.findComponent(SkinUploaderStub);
-    const preview = wrapper.get('.preview-stub');
+    },
+  });
+}
 
-    await uploader.trigger('click');
-    await flushPromises();
+describe('DashboardView overview', () => {
+  it('shows account state and quick actions without detail forms', () => {
+    const wrapper = mountDashboard();
 
-    expect(preview.attributes('data-skin-preview')).toBe('blob:skin');
-    expect(preview.attributes('data-skin-hash')).toBe('saved-skin');
-
-    uploader.vm.$emit('preview', null);
-    await flushPromises();
-
-    expect(preview.attributes('data-skin-preview')).toBe('');
-    expect(preview.attributes('data-skin-hash')).toBe('saved-skin');
+    expect(wrapper.get('.profile-summary-main h2').text()).toBe('Steve');
+    expect(wrapper.get('.overview-asset-status strong').text()).toBe('已设置');
+    expect(wrapper.findAll('.quick-action-card')).toHaveLength(4);
+    expect(wrapper.find('a[href="/dashboard/appearance"]').exists()).toBe(true);
+    expect(wrapper.find('a[href="/dashboard/security"]').exists()).toBe(true);
+    expect(wrapper.find('.upload-card').exists()).toBe(false);
+    expect(wrapper.find('#current-password').exists()).toBe(false);
+    expect(wrapper.find('.profile-management').exists()).toBe(false);
   });
 
-  it('refreshes the active upload and preview targets after switching the default profile', async () => {
+  it('refreshes overview state when the default profile changes', async () => {
     const secondProfile = {
       id: 'profile-2',
       name: 'SecondPlayer',
@@ -118,24 +85,13 @@ describe('DashboardView preview wiring', () => {
       ),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const wrapper = mount(DashboardView, {
-      global: {
-        stubs: {
-          UiCard: UiCardStub,
-          SkinUploader: SkinUploaderStub,
-          SkinPreview: SkinPreviewStub,
-          ProfileManagement: ProfileManagementStub,
-          SessionManagement: true,
-        },
-      },
-    });
+    const wrapper = mountDashboard();
 
     await auth.setDefaultProfile(secondProfile.id);
     await flushPromises();
 
-    const uploaders = wrapper.findAllComponents(SkinUploaderStub);
-    expect(uploaders[0]?.props('currentHash')).toBe('second-skin');
-    expect(wrapper.get('.preview-stub').attributes('data-skin-hash')).toBe('second-skin');
-    expect(wrapper.get('.preview-stub').attributes('data-cape-preview')).toBe('');
+    expect(wrapper.get('.profile-summary-main h2').text()).toBe('SecondPlayer');
+    expect(wrapper.get('.overview-context-list').text()).toContain('Slim');
+    expect(wrapper.get('.overview-asset-status strong').text()).toBe('已设置');
   });
 });

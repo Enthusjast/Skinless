@@ -150,8 +150,8 @@ onUnmounted(() => {
         </RouterLink>
         <RouterLink
           class="workspace-nav-link"
-          to="/dashboard#appearance"
-          :class="{ active: route.hash === '#appearance' }"
+          to="/dashboard/appearance"
+          :class="{ active: route.path === '/dashboard/appearance' }"
           @click="closeSidebar"
         >
           <Palette :size="18" aria-hidden="true" /><span>角色外观</span>
@@ -166,8 +166,8 @@ onUnmounted(() => {
         </RouterLink>
         <RouterLink
           class="workspace-nav-link"
-          to="/dashboard#security"
-          :class="{ active: route.hash === '#security' }"
+          to="/dashboard/security"
+          :class="{ active: route.path === '/dashboard/security' }"
           @click="closeSidebar"
         >
           <UserRound :size="18" aria-hidden="true" /><span>账户安全</span>
@@ -240,7 +240,7 @@ onUnmounted(() => {
               role="menu"
               @click.stop
             >
-              <RouterLink to="/dashboard#security" role="menuitem" @click="closeUserMenu"
+              <RouterLink to="/dashboard/security" role="menuitem" @click="closeUserMenu"
                 >账户安全</RouterLink
               >
               <button type="button" role="menuitem" @click="logout">

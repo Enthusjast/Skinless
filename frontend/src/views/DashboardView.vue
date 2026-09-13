@@ -1,47 +1,23 @@
 <script setup lang="ts">
-import { Copy, KeyRound, ShieldCheck } from 'lucide-vue-next';
-import { computed, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { formatApiError } from '../api';
-import EmailChangeForm from '../components/EmailChangeForm.vue';
-import AccountDeletion from '../components/AccountDeletion.vue';
+import {
+  CheckCircle2,
+  ChevronRight,
+  Copy,
+  ImagePlus,
+  Palette,
+  Settings2,
+  ShieldCheck,
+} from 'lucide-vue-next';
+import { computed, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 import UiCard from '../components/common/UiCard.vue';
-import SessionManagement from '../components/SessionManagement.vue';
-import ProfileManagement from '../components/ProfileManagement.vue';
-import SkinPreview from '../components/SkinPreview.vue';
-import SkinUploader from '../components/SkinUploader.vue';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
-const router = useRouter();
-const passwordForm = ref({ current: '', next: '' });
-const passwordMessage = ref('');
-const passwordError = ref('');
-const passwordBusy = ref(false);
 const profile = computed(() => auth.profile);
-const selectedModel = ref<'classic' | 'slim'>(auth.profile?.skinModel ?? 'classic');
 const copied = ref(false);
-const temporarySkinPreview = ref<string | null>(null);
-const temporaryCapePreview = ref<string | null>(null);
-
-watch(
-  () => profile.value?.id,
-  () => {
-    selectedModel.value = profile.value?.skinModel ?? 'classic';
-    temporarySkinPreview.value = null;
-    temporaryCapePreview.value = null;
-    copied.value = false;
-  },
-);
-
-function setAssetPreview(asset: 'skin' | 'cape', url: string | null) {
-  if (asset === 'skin') temporarySkinPreview.value = url;
-  else temporaryCapePreview.value = url;
-}
-
-function clearAssetPreview(asset: 'skin' | 'cape') {
-  setAssetPreview(asset, null);
-}
+const profileCount = computed(() => auth.availableProfiles.length);
+const modelLabel = computed(() => (profile.value?.skinModel === 'slim' ? 'Slim' : 'Classic'));
 
 async function copyProfileId() {
   if (!profile.value?.id) return;
@@ -51,25 +27,9 @@ async function copyProfileId() {
     copied.value = false;
   }, 1800);
 }
-
-async function changePassword() {
-  passwordBusy.value = true;
-  passwordMessage.value = '';
-  passwordError.value = '';
-  try {
-    await auth.updatePassword(passwordForm.value.current, passwordForm.value.next);
-    passwordForm.value = { current: '', next: '' };
-    await router.push({ path: '/login', query: { changed: '1' } });
-  } catch (cause) {
-    passwordError.value = formatApiError(cause, '修改失败。');
-  } finally {
-    passwordBusy.value = false;
-  }
-}
 </script>
 
 <template>
-  <ProfileManagement />
   <section class="profile-summary-card">
     <div class="profile-summary-main">
       <span class="profile-avatar-large">{{ profile?.name?.slice(0, 1).toUpperCase() }}</span>
@@ -80,106 +40,114 @@ async function changePassword() {
       </div>
     </div>
     <div class="profile-summary-meta">
-      <span class="status-badge"><i class="status-dot" />已连接</span
-      ><button
+      <span class="status-badge"><i class="status-dot" />已连接</span>
+      <button
         class="copy-id-button"
         type="button"
         :aria-label="copied ? 'Profile ID 已复制' : '复制 Profile ID'"
         @click="copyProfileId"
       >
-        <Copy :size="15" aria-hidden="true" />{{ copied ? '已复制' : '复制 Profile ID' }}</button
-      ><code>{{ profile?.id }}</code>
+        <Copy :size="15" aria-hidden="true" />{{ copied ? '已复制' : '复制 Profile ID' }}
+      </button>
+      <code>{{ profile?.id }}</code>
     </div>
   </section>
-  <div class="dashboard-grid">
-    <div class="dashboard-main">
-      <UiCard as="section" id="appearance" class="panel model-panel">
+
+  <div class="dashboard-overview">
+    <div class="dashboard-overview-main">
+      <UiCard as="section" class="overview-assets-panel" aria-labelledby="asset-status-title">
         <div class="workspace-section-heading">
           <div>
-            <p class="eyebrow">01 / APPEARANCE</p>
-            <h2>你的角色</h2>
+            <p class="eyebrow">CURRENT STATE</p>
+            <h2 id="asset-status-title">当前状态</h2>
           </div>
-          <span class="section-caption">选择模型后上传对应纹理</span>
+          <span class="section-caption">{{ profileCount }} 个 Profile</span>
         </div>
-        <div class="model-choice">
-          <label :class="{ selected: selectedModel === 'classic' }"
-            ><input v-model="selectedModel" value="classic" type="radio" name="model" />
-            <span><strong>Classic</strong><small>Steve · 粗手臂</small></span></label
-          >
-          <label :class="{ selected: selectedModel === 'slim' }"
-            ><input v-model="selectedModel" value="slim" type="radio" name="model" />
-            <span><strong>Slim</strong><small>Alex · 细手臂</small></span></label
-          >
+        <div class="overview-asset-grid">
+          <div class="overview-asset-status">
+            <span class="overview-asset-icon"><Palette :size="18" aria-hidden="true" /></span>
+            <div>
+              <small>皮肤</small><strong>{{ profile?.skinHash ? '已设置' : '未设置' }}</strong>
+            </div>
+            <CheckCircle2 v-if="profile?.skinHash" :size="17" aria-hidden="true" />
+          </div>
+          <div class="overview-asset-status">
+            <span class="overview-asset-icon"><ImagePlus :size="18" aria-hidden="true" /></span>
+            <div>
+              <small>披风</small><strong>{{ profile?.capeHash ? '已设置' : '未设置' }}</strong>
+            </div>
+            <CheckCircle2 v-if="profile?.capeHash" :size="17" aria-hidden="true" />
+          </div>
+          <div class="overview-asset-status">
+            <span class="overview-asset-icon"><Settings2 :size="18" aria-hidden="true" /></span>
+            <div>
+              <small>默认模型</small><strong>{{ modelLabel }}</strong>
+            </div>
+          </div>
         </div>
-        <p class="model-note">模型选择会在下一次皮肤上传时保存。</p>
       </UiCard>
-      <SkinUploader
-        v-if="profile"
-        asset="skin"
-        :current-hash="profile.skinHash"
-        :model="selectedModel"
-        @preview="setAssetPreview('skin', $event)"
-        @updated="clearAssetPreview('skin')"
-      />
-      <SkinUploader
-        v-if="profile"
-        asset="cape"
-        :current-hash="profile.capeHash"
-        :model="selectedModel"
-        @preview="setAssetPreview('cape', $event)"
-        @updated="clearAssetPreview('cape')"
-      />
-      <UiCard as="section" id="security" class="panel password-panel">
+
+      <section class="quick-actions" aria-labelledby="quick-actions-title">
         <div class="workspace-section-heading">
           <div>
-            <p class="eyebrow">02 / ACCOUNT SECURITY</p>
-            <h2>账户安全</h2>
+            <p class="eyebrow">QUICK ACTIONS</p>
+            <h2 id="quick-actions-title">快速操作</h2>
           </div>
-          <ShieldCheck :size="20" class="section-icon" aria-hidden="true" />
         </div>
-        <p class="section-description">修改密码后，当前登录设备会退出，需要重新登录。</p>
-        <form class="inline-form" @submit.prevent="changePassword">
-          <div class="field">
-            <label for="current-password">当前密码</label
-            ><input
-              id="current-password"
-              v-model="passwordForm.current"
-              type="password"
-              autocomplete="current-password"
-              required
-            />
-          </div>
-          <div class="field">
-            <label for="new-password">新密码</label
-            ><input
-              id="new-password"
-              v-model="passwordForm.next"
-              type="password"
-              autocomplete="new-password"
-              minlength="8"
-              required
-            />
-          </div>
-          <button class="button button-primary button-small" type="submit" :disabled="passwordBusy">
-            <KeyRound :size="16" aria-hidden="true" />{{ passwordBusy ? '保存中…' : '更新密码' }}
-          </button>
-        </form>
-        <p v-if="passwordMessage" class="form-success" role="status">{{ passwordMessage }}</p>
-        <p v-if="passwordError" class="form-error" role="alert">{{ passwordError }}</p>
-        <EmailChangeForm />
-        <SessionManagement />
-        <AccountDeletion />
-      </UiCard>
+        <div class="quick-action-grid">
+          <RouterLink class="quick-action-card" to="/dashboard/appearance">
+            <span class="quick-action-icon"><Palette :size="19" aria-hidden="true" /></span>
+            <span class="quick-action-copy"
+              ><strong>角色外观</strong><small>管理 Profile、模型和纹理</small></span
+            >
+            <ChevronRight :size="18" aria-hidden="true" />
+          </RouterLink>
+          <RouterLink class="quick-action-card" to="/dashboard/wardrobe">
+            <span class="quick-action-icon"><ImagePlus :size="19" aria-hidden="true" /></span>
+            <span class="quick-action-copy"
+              ><strong>纹理衣柜</strong><small>保存并应用皮肤与披风</small></span
+            >
+            <ChevronRight :size="18" aria-hidden="true" />
+          </RouterLink>
+          <RouterLink class="quick-action-card" to="/dashboard/security">
+            <span class="quick-action-icon"><ShieldCheck :size="19" aria-hidden="true" /></span>
+            <span class="quick-action-copy"
+              ><strong>账户安全</strong><small>密码、邮箱和登录会话</small></span
+            >
+            <ChevronRight :size="18" aria-hidden="true" />
+          </RouterLink>
+          <RouterLink class="quick-action-card" to="/dashboard/setup">
+            <span class="quick-action-icon"><Settings2 :size="19" aria-hidden="true" /></span>
+            <span class="quick-action-copy"
+              ><strong>启动器设置</strong><small>检查连接参数和服务状态</small></span
+            >
+            <ChevronRight :size="18" aria-hidden="true" />
+          </RouterLink>
+        </div>
+      </section>
     </div>
-    <aside class="dashboard-side">
-      <SkinPreview
-        v-if="profile"
-        :skin-hash="profile.skinHash"
-        :cape-hash="profile.capeHash"
-        :skin-preview-url="temporarySkinPreview"
-        :cape-preview-url="temporaryCapePreview"
-        :model="selectedModel"
-      />
-    </aside>
+
+    <UiCard as="section" class="overview-context-panel" aria-labelledby="context-title">
+      <p class="eyebrow">WORKSPACE STATUS</p>
+      <h2 id="context-title">工作区已就绪</h2>
+      <p>从这里开始管理你的 Minecraft 身份。详细设置会在对应页面中展开。</p>
+      <dl class="overview-context-list">
+        <div>
+          <dt>默认模型</dt>
+          <dd>{{ modelLabel }}</dd>
+        </div>
+        <div>
+          <dt>Profile 数量</dt>
+          <dd>{{ profileCount }}</dd>
+        </div>
+        <div>
+          <dt>账户状态</dt>
+          <dd>已连接</dd>
+        </div>
+      </dl>
+      <RouterLink class="button button-ghost button-small" to="/dashboard/setup">
+        查看连接设置<ChevronRight :size="16" aria-hidden="true" />
+      </RouterLink>
+    </UiCard>
   </div>
 </template>

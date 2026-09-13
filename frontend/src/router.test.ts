@@ -15,6 +15,20 @@ describe('workspace routes', () => {
     });
   });
 
+  it('exposes dedicated appearance and security workspace routes', () => {
+    const appearance = router.getRoutes().find((route) => route.path === '/dashboard/appearance');
+    const security = router.getRoutes().find((route) => route.path === '/dashboard/security');
+
+    expect(appearance).toMatchObject({
+      path: '/dashboard/appearance',
+      meta: { title: '角色外观', description: '管理 Profile、模型和皮肤纹理。' },
+    });
+    expect(security).toMatchObject({
+      path: '/dashboard/security',
+      meta: { title: '账户安全', description: '管理密码、邮箱、会话和账号生命周期。' },
+    });
+  });
+
   it('exposes canonical and name-alias public profile routes with noindex metadata', () => {
     const canonical = router.getRoutes().find((route) => route.path === '/profiles/:uuid');
     const alias = router.getRoutes().find((route) => route.path === '/profiles/name/:name');
