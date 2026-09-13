@@ -116,4 +116,19 @@ describe('SkinPreview', () => {
     );
     expect(wrapper.get('.preview-card').attributes('aria-label')).toContain('未保存');
   });
+
+  it('allows keyboard-accessible switching between 2D and 3D modes', async () => {
+    const wrapper = mount(SkinPreview, {
+      props: { skinHash: 'skin-hash', capeHash: null, model: 'classic' },
+    });
+
+    const threeDButton = wrapper.get('[aria-label="使用 3D 预览"]');
+    expect(threeDButton.attributes('aria-pressed')).toBe('false');
+
+    await threeDButton.trigger('click');
+
+    expect(threeDButton.attributes('aria-pressed')).toBe('true');
+    expect(wrapper.find('.skin-stage').exists()).toBe(false);
+    wrapper.unmount();
+  });
 });

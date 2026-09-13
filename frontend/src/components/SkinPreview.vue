@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { Box, Rotate3D } from 'lucide-vue-next';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { API_BASE_URL } from '../api';
+
+const SkinViewer3D = defineAsyncComponent(() => import('./SkinViewer3D.vue'));
 
 type TextureRect = {
   x: number;
@@ -47,6 +50,8 @@ const capeUrl = computed(
 const hasSkin = computed(() => Boolean(skinUrl.value));
 const hasCape = computed(() => Boolean(capeUrl.value));
 const hasUnsavedPreview = computed(() => Boolean(props.skinPreviewUrl || props.capePreviewUrl));
+const previewMode = ref<'2d' | '3d'>('2d');
+const threeError = ref('');
 const modelLabel = computed(() => (props.model === 'slim' ? 'Slim' : 'Classic'));
 const previewLabel = computed(() => {
   const capeLabel = hasCape.value ? '有披风' : '无披风';
@@ -180,16 +185,61 @@ const textureParts = computed<TexturePart[]>(() => {
 const headParts = computed(() => textureParts.value.filter((part) => part.row === 'head'));
 const bodyParts = computed(() => textureParts.value.filter((part) => part.row === 'body'));
 const legParts = computed(() => textureParts.value.filter((part) => part.row === 'legs'));
+
+function selectPreviewMode(mode: '2d' | '3d') {
+  if (mode === '3d' && !hasSkin.value) return;
+  previewMode.value = mode;
+  if (mode === '3d') threeError.value = '';
+}
+
+function handleThreeFallback(message: string) {
+  threeError.value = message;
+  previewMode.value = '2d';
+}
+
+watch(hasSkin, (available) => {
+  if (!available) previewMode.value = '2d';
+});
 </script>
 
 <template>
-  <div class="preview-card" role="img" :aria-label="previewLabel">
+  <section class="preview-card" :aria-label="previewLabel">
     <div class="preview-heading">
-      <span>LIVE PREVIEW</span
-      ><small>{{ model === 'slim' ? 'ALEX / SLIM' : 'STEVE / CLASSIC' }}</small>
+      <div class="preview-heading-copy">
+        <span>LIVE PREVIEW</span
+        ><small>{{ model === 'slim' ? 'ALEX / SLIM' : 'STEVE / CLASSIC' }}</small>
+      </div>
+      <div class="preview-mode-switch" role="group" aria-label="选择预览模式">
+        <button
+          class="preview-mode-button"
+          :class="{ active: previewMode === '2d' }"
+          type="button"
+          :aria-pressed="previewMode === '2d'"
+          aria-label="使用 2D 预览"
+          @click="selectPreviewMode('2d')"
+        >
+          <Box :size="14" aria-hidden="true" />2D
+        </button>
+        <button
+          class="preview-mode-button"
+          :class="{ active: previewMode === '3d' }"
+          type="button"
+          :aria-pressed="previewMode === '3d'"
+          :disabled="!hasSkin"
+          :title="hasSkin ? '加载 3D 预览' : '需要先设置皮肤'"
+          aria-label="使用 3D 预览"
+          @click="selectPreviewMode('3d')"
+        >
+          <Rotate3D :size="14" aria-hidden="true" />3D
+        </button>
+      </div>
     </div>
+    <p v-if="threeError" class="preview-notice" role="status">
+      {{ threeError }}
+      <button class="text-button" type="button" @click="selectPreviewMode('3d')">再试一次</button>
+    </p>
     <div
-      v-if="hasSkin || hasCape"
+      v-if="previewMode === '2d' && (hasSkin || hasCape)"
       class="skin-stage"
       :aria-label="hasSkin ? '皮肤 2D 预览' : '披风 2D 预览'"
     >
@@ -296,9 +346,16 @@ const legParts = computed(() => textureParts.value.filter((part) => part.row ===
         <span>披风</span>
       </div>
     </div>
-    <div v-else class="preview-empty">
+    <SkinViewer3D
+      v-else-if="previewMode === '3d' && hasSkin"
+      :skin-url="skinUrl"
+      :cape-url="hasCape ? capeUrl : null"
+      :model="model"
+      @fallback="handleThreeFallback"
+    />
+    <div v-else-if="!hasSkin && !hasCape" class="preview-empty">
       <span class="empty-cube">+</span>
       <p>上传皮肤后<br />在这里查看预览</p>
     </div>
-  </div>
+  </section>
 </template>

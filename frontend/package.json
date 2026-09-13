@@ -17,6 +17,7 @@
     "@fontsource/press-start-2p": "^5.2.5",
     "lucide-vue-next": "^0.468.0",
     "pinia": "^2.2.4",
+    "skinview3d": "^3.4.2",
     "vue": "^3.5.10",
     "vue-router": "^4.4.5"
   },
