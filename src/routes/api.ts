@@ -29,6 +29,7 @@ import {
   listTexturesByUserId,
   listProfilesByUserId,
   listRegistrationInvites,
+  listAuditLogs,
   findWebSessionById,
   listWebSessions,
   revokeWebSession,
@@ -48,6 +49,13 @@ import {
   MAX_PROFILES_PER_USER,
   setDefaultProfile,
 } from '../db/queries';
+import {
+  AUDIT_ACTIONS,
+  recordAuditLog,
+  requestIdFromRequest,
+  sanitizeAuditMetadata,
+  type AuditLogEvent,
+} from '../audit';
 import {
   cacheTextureObject,
   cancelTextureCleanupIfReferenced,
@@ -296,6 +304,38 @@ function serializeRegistrationInvite(
   };
 }
 
+function serializeAuditMetadata(value: string): Record<string, unknown> {
+  try {
+    return sanitizeAuditMetadata(JSON.parse(value));
+  } catch {
+    return {};
+  }
+}
+
+function serializeAuditLog(log: {
+  id: string;
+  actor_user_id: string | null;
+  target_user_id: string | null;
+  target_resource: string | null;
+  action: string;
+  result: 'success' | 'failure';
+  request_id: string;
+  metadata: string;
+  created_at: number;
+}) {
+  return {
+    id: log.id,
+    actorUserId: log.actor_user_id,
+    targetUserId: log.target_user_id,
+    targetResource: log.target_resource,
+    action: log.action,
+    result: log.result,
+    requestId: log.request_id,
+    metadata: serializeAuditMetadata(log.metadata),
+    createdAt: log.created_at,
+  };
+}
+
 function validationError(c: Context<AppEnv>, result: { code: string; message: string }): Response {
   return jsonError(c, 400, result.message, 'IllegalArgumentException', result.code);
 }
@@ -337,6 +377,16 @@ function requireAdminConfirmation(
 
 function adminUserNotFound(c: Context<AppEnv>): Response {
   return jsonError(c, 404, 'User not found.', 'NotFound', 'user_not_found');
+}
+
+async function writeAudit(
+  c: Context<AppEnv>,
+  event: Omit<AuditLogEvent, 'requestId'> & { requestId?: string | null },
+): Promise<void> {
+  await recordAuditLog(c.env.DB, {
+    ...event,
+    requestId: event.requestId ?? requestIdFromRequest(c.req.raw),
+  });
 }
 
 function adminGuardError(c: Context<AppEnv>, targetId: string, actorId: string): Response {
@@ -958,6 +1008,13 @@ routes.put('/user/password', authMiddleware, async (c) => {
   await updatePassword(c.env.DB, user.id, await hashPassword(newPassword, salt), salt, Date.now());
   await deleteUserTokens(c.env.DB, user.id);
   await revokeUserWebSessions(c.env.DB, user.id, Date.now());
+  await writeAudit(c, {
+    actorUserId: user.id,
+    targetUserId: user.id,
+    targetResource: `user:${user.id}`,
+    action: AUDIT_ACTIONS.ACCOUNT_PASSWORD_CHANGE,
+    result: 'success',
+  });
   if (c.get('authMethod') === 'cookie') clearWebSessionCookies(c);
   return c.body(null, 204);
 });
@@ -983,6 +1040,58 @@ routes.get('/admin/users', authMiddleware, adminMiddleware, async (c) => {
   return c.json({ users: users.map(serializeUserWithProfile) });
 });
 
+function auditQueryValue(c: Context<AppEnv>, ...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = c.req.query(name)?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function auditTimestamp(value: string | undefined, inclusiveEnd = false): number | undefined | null {
+  if (!value) return undefined;
+  const parsed = /^\d+$/.test(value) ? Number(value) : Date.parse(value);
+  if (!Number.isSafeInteger(parsed)) return null;
+  return inclusiveEnd && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? parsed + 24 * 60 * 60 * 1000 - 1
+    : parsed;
+}
+
+routes.get('/admin/audit-logs', authMiddleware, adminMiddleware, async (c) => {
+  const rawLimit = Number(c.req.query('limit') ?? '50');
+  const rawOffset = Number(c.req.query('offset') ?? '0');
+  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
+  const offset = Number.isInteger(rawOffset) ? Math.max(rawOffset, 0) : 0;
+  const action = auditQueryValue(c, 'action');
+  const actorUserId = auditQueryValue(c, 'actorUserId', 'actor', 'actor_id', 'actor_user_id');
+  const targetUserId = auditQueryValue(c, 'targetUserId', 'target', 'target_id', 'target_user_id');
+  const fromCreatedAt = auditTimestamp(auditQueryValue(c, 'from', 'dateFrom', 'start', 'date_from'));
+  const toCreatedAt = auditTimestamp(auditQueryValue(c, 'to', 'dateTo', 'end', 'date_to'), true);
+  if (fromCreatedAt === null || toCreatedAt === null) {
+    return jsonError(c, 400, 'Audit date filters must be timestamps or ISO dates.', 'IllegalArgumentException', 'invalid_audit_date');
+  }
+  if (fromCreatedAt !== undefined && toCreatedAt !== undefined && fromCreatedAt > toCreatedAt) {
+    return jsonError(c, 400, 'The audit start date must be before the end date.', 'IllegalArgumentException', 'invalid_audit_date_range');
+  }
+
+  const result = await listAuditLogs(c.env.DB, {
+    limit: limit + 1,
+    offset,
+    action,
+    actorUserId,
+    targetUserId,
+    fromCreatedAt,
+    toCreatedAt,
+  });
+  const logs = result.slice(0, limit);
+  return c.json({
+    logs: logs.map(serializeAuditLog),
+    limit,
+    offset,
+    hasMore: result.length > limit,
+  });
+});
+
 routes.put('/admin/users/:id/role', authMiddleware, adminMiddleware, async (c) => {
   const body = await readJson<RoleInput>(c);
   const role = body?.role;
@@ -1002,6 +1111,14 @@ routes.put('/admin/users/:id/role', authMiddleware, adminMiddleware, async (c) =
   if (!updated) return adminMutationConflict(c, user.id, c.get('user').id);
   const nextUser = await findUserById(c.env.DB, user.id);
   const nextProfile = nextUser ? await findAnyProfileByUserId(c.env.DB, user.id) : null;
+  await writeAudit(c, {
+    actorUserId: c.get('user').id,
+    targetUserId: user.id,
+    targetResource: `user:${user.id}`,
+    action: AUDIT_ACTIONS.ADMIN_USER_ROLE_UPDATE,
+    result: 'success',
+    metadata: { fromRole: user.role, toRole: role },
+  });
   return c.json({ user: nextUser ? serializeAdminUser(nextUser, nextProfile ?? undefined) : { ...serializeUser(user), role } });
 });
 
@@ -1039,6 +1156,14 @@ async function updateAdminUserStatus(c: Context<AppEnv>): Promise<Response> {
   const nextUser = await findUserById(c.env.DB, userId);
   if (!nextUser) return adminUserNotFound(c);
   const nextProfile = await findAnyProfileByUserId(c.env.DB, userId);
+  await writeAudit(c, {
+    actorUserId: c.get('user').id,
+    targetUserId: userId,
+    targetResource: `user:${userId}`,
+    action: AUDIT_ACTIONS.ADMIN_USER_STATUS_UPDATE,
+    result: 'success',
+    metadata: { fromStatus: user.status ?? 'active', toStatus: parsed.value },
+  });
   return c.json({ user: serializeAdminUser(nextUser, nextProfile ?? undefined) });
 }
 
@@ -1054,6 +1179,13 @@ async function revokeAdminUserSessions(c: Context<AppEnv>): Promise<Response> {
   const user = await findUserById(c.env.DB, userId);
   if (!user) return adminUserNotFound(c);
   await revokeUserAuthSessions(c.env.DB, userId, Date.now());
+  await writeAudit(c, {
+    actorUserId: c.get('user').id,
+    targetUserId: userId,
+    targetResource: `user:${userId}`,
+    action: AUDIT_ACTIONS.ADMIN_USER_SESSIONS_REVOKE,
+    result: 'success',
+  });
   return c.body(null, 204);
 }
 
@@ -1082,6 +1214,14 @@ async function deleteAdminUserAccount(c: Context<AppEnv>): Promise<Response> {
     throw error;
   }
   if (!deleted) return adminMutationConflict(c, userId, c.get('user').id);
+  await writeAudit(c, {
+    actorUserId: c.get('user').id,
+    targetUserId: null,
+    targetResource: `user:${userId}`,
+    action: AUDIT_ACTIONS.ADMIN_USER_DELETE,
+    result: 'success',
+    metadata: { deletedUserId: userId },
+  });
   return c.body(null, 204);
 }
 
@@ -1127,6 +1267,31 @@ async function updateAdminSettings(c: Context<AppEnv>): Promise<Response> {
   if (!updated) {
     return jsonError(c, 500, 'Registration settings could not be saved.', 'InternalServerError', 'internal_server_error');
   }
+  await writeAudit(c, {
+    actorUserId: c.get('user').id,
+    targetResource: 'site_settings:1',
+    action: AUDIT_ACTIONS.ADMIN_SETTINGS_UPDATE,
+    result: 'success',
+    metadata: {
+      previousRegistrationMode: record.registration_mode,
+      registrationMode: updated.registration_mode,
+      maxProfilesPerUser: updated.max_profiles_per_user,
+      maxTexturesPerUser: updated.max_textures_per_user,
+      enforceJoinIp: updated.enforce_join_ip === 1,
+    },
+  });
+  if (record.registration_mode !== updated.registration_mode) {
+    await writeAudit(c, {
+      actorUserId: c.get('user').id,
+      targetResource: 'site_settings:1',
+      action: AUDIT_ACTIONS.ADMIN_REGISTRATION_MODE_UPDATE,
+      result: 'success',
+      metadata: {
+        from: record.registration_mode,
+        to: updated.registration_mode,
+      },
+    });
+  }
   return c.json({ settings: serializeSiteSettings(updated) });
 }
 
@@ -1164,6 +1329,16 @@ routes.post('/admin/invites', authMiddleware, adminMiddleware, async (c) => {
     updated_at: now,
   };
   await insertRegistrationInvite(c.env.DB, invite);
+  await writeAudit(c, {
+    actorUserId: c.get('user').id,
+    targetResource: `invite:${invite.id}`,
+    action: AUDIT_ACTIONS.ADMIN_INVITE_CREATE,
+    result: 'success',
+    metadata: {
+      useLimit: invite.use_limit,
+      hasExpiry: invite.expires_at !== null,
+    },
+  });
   return c.json({ invite: serializeRegistrationInvite(invite, code) }, 201);
 });
 
@@ -1174,6 +1349,12 @@ async function revokeAdminInvite(c: Context<AppEnv>): Promise<Response> {
   if (!invite.revoked_at) await revokeRegistrationInvite(c.env.DB, id, Date.now());
   const revoked = await findRegistrationInviteById(c.env.DB, id);
   if (!revoked) return jsonError(c, 404, 'Invite not found.', 'NotFound', 'invite_not_found');
+  await writeAudit(c, {
+    actorUserId: c.get('user').id,
+    targetResource: `invite:${id}`,
+    action: AUDIT_ACTIONS.ADMIN_INVITE_REVOKE,
+    result: 'success',
+  });
   return c.json({ invite: serializeRegistrationInvite(revoked) });
 }
 

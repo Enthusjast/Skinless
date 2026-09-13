@@ -11,6 +11,7 @@ import { securityHeadersMiddleware } from './middleware/security';
 import { metadata } from './utils/config';
 import { processTextureCleanup } from './texture-cleanup';
 import { processExpiredAccountDeletions } from './account-deletion';
+import { processAuditLogCleanup } from './audit-cleanup';
 
 export { RateLimiterDurableObject } from './durable-objects/rate-limiter';
 
@@ -58,6 +59,7 @@ const worker: ExportedHandler<Bindings> = {
     await env.DB.prepare('DELETE FROM server_sessions WHERE expires_at < ?').bind(now).run();
     await processTextureCleanup(env.DB, env.BUCKET, now);
     await processExpiredAccountDeletions(env.DB, now);
+    await processAuditLogCleanup(env.DB, now);
   },
 };
 

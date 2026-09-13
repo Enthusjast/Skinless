@@ -1,4 +1,5 @@
 import type {
+  AuditLogRecord,
   ProfileRecord,
   TokenRecord,
   UserRecord,
@@ -2046,6 +2047,79 @@ export async function listUsers(
     .bind(limit, offset)
     .all<UserWithProfile>();
   return result.results;
+}
+
+export interface AuditLogListOptions {
+  limit: number;
+  offset: number;
+  action?: string;
+  actorUserId?: string;
+  targetUserId?: string;
+  fromCreatedAt?: number;
+  toCreatedAt?: number;
+}
+
+export async function listAuditLogs(
+  db: D1Database,
+  options: AuditLogListOptions,
+): Promise<AuditLogRecord[]> {
+  const conditions: string[] = [];
+  const values: Array<string | number> = [];
+  if (options.action) {
+    conditions.push('action = ?');
+    values.push(options.action);
+  }
+  if (options.actorUserId) {
+    conditions.push('actor_user_id = ?');
+    values.push(options.actorUserId);
+  }
+  if (options.targetUserId) {
+    conditions.push('target_user_id = ?');
+    values.push(options.targetUserId);
+  }
+  if (options.fromCreatedAt !== undefined) {
+    conditions.push('created_at >= ?');
+    values.push(options.fromCreatedAt);
+  }
+  if (options.toCreatedAt !== undefined) {
+    conditions.push('created_at <= ?');
+    values.push(options.toCreatedAt);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  values.push(options.limit, options.offset);
+  const result = await db
+    .prepare(
+      `SELECT id, actor_user_id, target_user_id, target_resource,
+              action, result, request_id, metadata, created_at
+       FROM audit_logs
+       ${where}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(...values)
+    .all<AuditLogRecord>();
+  return result.results;
+}
+
+export async function deleteAuditLogsBefore(
+  db: D1Database,
+  beforeCreatedAt: number,
+  limit: number,
+): Promise<number> {
+  const result = await db
+    .prepare(
+      `DELETE FROM audit_logs
+       WHERE id IN (
+         SELECT id
+         FROM audit_logs
+         WHERE created_at < ?
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?
+       )`,
+    )
+    .bind(beforeCreatedAt, limit)
+    .run();
+  return result.meta?.changes ?? 0;
 }
 
 export function isConstraintViolation(error: unknown): boolean {

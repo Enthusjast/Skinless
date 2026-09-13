@@ -2,6 +2,9 @@
 import { computed, onMounted, ref } from 'vue';
 import {
   Ban,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
   MoreHorizontal,
   RefreshCw,
   Save,
@@ -15,6 +18,7 @@ import {
 import {
   createAdminInvite,
   deleteAdminUser,
+  getAdminAuditLogs,
   formatApiError,
   getAdminInvites,
   getAdminSettings,
@@ -25,6 +29,7 @@ import {
   updateAdminUserStatus,
   updateUserRole,
   type AdminInvite,
+  type AdminAuditLog,
   type AdminRegistrationSettings,
   type AdminUser,
   type AdminUserStatus,
@@ -70,8 +75,36 @@ const actionConfirmation = ref('');
 const actionModalError = ref('');
 const actionRunning = ref(false);
 const userActionSuccess = ref('');
+const auditLogs = ref<AdminAuditLog[]>([]);
+const auditLoading = ref(true);
+const auditError = ref('');
+const auditAction = ref('');
+const auditActor = ref('');
+const auditTarget = ref('');
+const auditDateFrom = ref('');
+const auditDateTo = ref('');
+const auditOffset = ref(0);
+const auditHasMore = ref(false);
+const AUDIT_PAGE_SIZE = 25;
 
 type UserAction = 'disable' | 'enable' | 'revoke_sessions' | 'delete' | 'demote';
+
+const auditActionOptions = [
+  ['admin.user.role.update', '管理员角色变更'],
+  ['admin.user.status.update', '账号状态变更'],
+  ['admin.user.sessions.revoke', '管理员撤销会话'],
+  ['admin.user.delete', '管理员删除账号'],
+  ['admin.invite.create', '创建邀请码'],
+  ['admin.invite.revoke', '撤销邀请码'],
+  ['admin.settings.update', '更新管理设置'],
+  ['admin.registration_mode.update', '更新注册模式'],
+  ['account.deletion.request', '请求删除账号'],
+  ['account.deletion.restore', '恢复账号'],
+  ['account.deletion.finalize', '完成账号删除'],
+  ['account.password.change', '修改密码'],
+  ['account.password.reset', '重置密码'],
+  ['account.email.change', '修改邮箱'],
+] as const;
 
 const filteredUsers = computed(() =>
   users.value.filter((user) => {
@@ -332,8 +365,57 @@ async function revokeInvite(invite: AdminInvite) {
   }
 }
 
+function auditFilters() {
+  return {
+    limit: AUDIT_PAGE_SIZE,
+    offset: auditOffset.value,
+    ...(auditAction.value ? { action: auditAction.value } : {}),
+    ...(auditActor.value.trim() ? { actorUserId: auditActor.value.trim() } : {}),
+    ...(auditTarget.value.trim() ? { targetUserId: auditTarget.value.trim() } : {}),
+    ...(auditDateFrom.value ? { from: auditDateFrom.value } : {}),
+    ...(auditDateTo.value ? { to: auditDateTo.value } : {}),
+  };
+}
+
+async function loadAuditLogs(reset = false): Promise<void> {
+  if (!auth.isAuthenticated) return;
+  if (reset) auditOffset.value = 0;
+  auditLoading.value = true;
+  auditError.value = '';
+  try {
+    const response = await getAdminAuditLogs(auditFilters());
+    auditLogs.value = response.logs;
+    auditOffset.value = response.offset;
+    auditHasMore.value = response.hasMore;
+  } catch (cause) {
+    auditError.value = formatApiError(cause, '无法加载审计日志。');
+  } finally {
+    auditLoading.value = false;
+  }
+}
+
+function submitAuditFilters(): void {
+  void loadAuditLogs(true);
+}
+
+function nextAuditPage(): void {
+  if (auditLoading.value || !auditHasMore.value) return;
+  auditOffset.value += AUDIT_PAGE_SIZE;
+  void loadAuditLogs();
+}
+
+function previousAuditPage(): void {
+  if (auditLoading.value || auditOffset.value === 0) return;
+  auditOffset.value = Math.max(0, auditOffset.value - AUDIT_PAGE_SIZE);
+  void loadAuditLogs();
+}
+
+function auditResultLabel(result: AdminAuditLog['result']): string {
+  return result === 'success' ? '成功' : '失败';
+}
+
 onMounted(() => {
-  void Promise.all([loadUsers(), loadSettings(), loadInvites()]);
+  void Promise.all([loadUsers(), loadSettings(), loadInvites(), loadAuditLogs()]);
 });
 </script>
 
@@ -530,6 +612,138 @@ onMounted(() => {
       <p v-else class="empty-state admin-empty-state">还没有邀请码。</p>
     </UiCard>
   </section>
+
+  <UiCard as="section" class="panel admin-audit-panel">
+    <div class="workspace-section-heading">
+      <div>
+        <p class="eyebrow">SECURITY HISTORY</p>
+        <h2>管理员审计日志</h2>
+        <p class="section-description">只读查看账号与管理操作。敏感凭据和原始请求信息不会显示。</p>
+      </div>
+      <ShieldCheck class="section-icon" :size="20" aria-hidden="true" />
+    </div>
+    <form class="admin-audit-filters" @submit.prevent="submitAuditFilters">
+      <div class="field">
+        <label for="audit-action">操作</label>
+        <select id="audit-action" v-model="auditAction" name="audit-action">
+          <option value="">全部操作</option>
+          <option v-for="[value, label] in auditActionOptions" :key="value" :value="value">
+            {{ label }}
+          </option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="audit-actor">操作者 ID</label>
+        <input id="audit-actor" v-model="auditActor" name="audit-actor" type="text" />
+      </div>
+      <div class="field">
+        <label for="audit-target">目标 ID</label>
+        <input id="audit-target" v-model="auditTarget" name="audit-target" type="text" />
+      </div>
+      <div class="field">
+        <label for="audit-date-from">开始日期</label>
+        <input id="audit-date-from" v-model="auditDateFrom" name="audit-date-from" type="date" />
+      </div>
+      <div class="field">
+        <label for="audit-date-to">结束日期</label>
+        <input id="audit-date-to" v-model="auditDateTo" name="audit-date-to" type="date" />
+      </div>
+      <button class="button button-ghost button-small" type="submit" :disabled="auditLoading">
+        <Filter :size="15" aria-hidden="true" />筛选
+      </button>
+    </form>
+    <div v-if="auditLoading" data-state="audit-loading" class="admin-control-loading" role="status">
+      正在加载审计日志…
+    </div>
+    <div v-else-if="auditError" data-state="audit-error" class="admin-error-state">
+      <p class="form-error" role="alert">{{ auditError }}</p>
+      <button class="button button-ghost button-small" type="button" @click="loadAuditLogs()">
+        <RefreshCw :size="16" aria-hidden="true" />重试
+      </button>
+    </div>
+    <div
+      v-else-if="auditLogs.length === 0"
+      data-state="audit-empty"
+      class="empty-state admin-empty-state"
+    >
+      还没有匹配的审计记录。
+    </div>
+    <div v-else class="admin-audit-results">
+      <div class="admin-table-desktop">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>操作</th>
+              <th>结果</th>
+              <th>操作者</th>
+              <th>目标</th>
+              <th>请求 ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="log in auditLogs" :key="log.id" :data-audit-id="log.id">
+              <td>{{ new Date(log.createdAt).toLocaleString('zh-CN') }}</td>
+              <td>
+                <code>{{ log.action }}</code>
+              </td>
+              <td>
+                <span
+                  :class="log.result === 'success' ? 'admin-audit-success' : 'admin-audit-failure'"
+                >
+                  {{ auditResultLabel(log.result) }}
+                </span>
+              </td>
+              <td>{{ log.actorUserId ?? '系统' }}</td>
+              <td>{{ log.targetUserId ?? log.targetResource ?? '—' }}</td>
+              <td>
+                <code>{{ log.requestId }}</code>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="admin-audit-cards">
+        <article
+          v-for="log in auditLogs"
+          :key="`card-${log.id}`"
+          class="admin-audit-card"
+          :data-audit-id="log.id"
+        >
+          <div class="admin-audit-card-heading">
+            <code>{{ log.action }}</code>
+            <span :class="log.result === 'success' ? 'admin-audit-success' : 'admin-audit-failure'">
+              {{ auditResultLabel(log.result) }}
+            </span>
+          </div>
+          <span>{{ new Date(log.createdAt).toLocaleString('zh-CN') }}</span>
+          <span>操作者：{{ log.actorUserId ?? '系统' }}</span>
+          <span>目标：{{ log.targetUserId ?? log.targetResource ?? '—' }}</span>
+        </article>
+      </div>
+      <div v-if="auditHasMore || auditOffset > 0" class="admin-audit-pagination">
+        <button
+          class="button button-ghost button-small"
+          type="button"
+          :disabled="auditLoading || auditOffset === 0"
+          data-state="audit-previous"
+          @click="previousAuditPage"
+        >
+          <ChevronLeft :size="15" aria-hidden="true" />上一页
+        </button>
+        <span>第 {{ Math.floor(auditOffset / AUDIT_PAGE_SIZE) + 1 }} 页</span>
+        <button
+          class="button button-ghost button-small"
+          type="button"
+          :disabled="auditLoading || !auditHasMore"
+          data-state="audit-next"
+          @click="nextAuditPage"
+        >
+          下一页<ChevronRight :size="15" aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  </UiCard>
 
   <section class="admin-stats" aria-label="用户统计">
     <UiCard as="article" class="stat-card"

@@ -139,6 +139,28 @@ export interface AdminInvite {
   updatedAt: number;
 }
 
+export interface AdminAuditLog {
+  id: string;
+  actorUserId: string | null;
+  targetUserId: string | null;
+  targetResource: string | null;
+  action: string;
+  result: 'success' | 'failure';
+  requestId: string;
+  metadata: Record<string, unknown>;
+  createdAt: number;
+}
+
+export interface AdminAuditLogFilters {
+  limit: number;
+  offset: number;
+  action?: string;
+  actorUserId?: string;
+  targetUserId?: string;
+  from?: string;
+  to?: string;
+}
+
 export class ApiError extends Error {
   public constructor(
     public readonly status: number,
@@ -702,4 +724,24 @@ export function revokeAdminInvite(inviteId: string): Promise<{ invite: AdminInvi
     `/api/admin/invites/${encodeURIComponent(inviteId)}/revoke`,
     { method: 'POST' },
   );
+}
+
+export function getAdminAuditLogs(
+  filters: AdminAuditLogFilters,
+): Promise<{ logs: AdminAuditLog[]; limit: number; offset: number; hasMore: boolean }> {
+  const params = new URLSearchParams({
+    limit: String(filters.limit),
+    offset: String(filters.offset),
+  });
+  if (filters.action) params.set('action', filters.action);
+  if (filters.actorUserId) params.set('actorUserId', filters.actorUserId);
+  if (filters.targetUserId) params.set('targetUserId', filters.targetUserId);
+  if (filters.from) params.set('from', filters.from);
+  if (filters.to) params.set('to', filters.to);
+  return managementRequest<{
+    logs: AdminAuditLog[];
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  }>(`/api/admin/audit-logs?${params.toString()}`);
 }

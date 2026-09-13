@@ -145,6 +145,18 @@ export interface AccountChallengeRecord {
   updated_at: number;
 }
 
+export interface AuditLogRecord {
+  id: string;
+  actor_user_id: string | null;
+  target_user_id: string | null;
+  target_resource: string | null;
+  action: string;
+  result: 'success' | 'failure';
+  request_id: string;
+  metadata: string;
+  created_at: number;
+}
+
 export interface UserWithProfile extends UserRecord {
   profile_id: string;
   profile_name: string;

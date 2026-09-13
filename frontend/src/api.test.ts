@@ -6,6 +6,7 @@ import {
   completeEmailChange,
   formatApiError,
   getAdminInvites,
+  getAdminAuditLogs,
   getAdminSettings,
   login,
   deleteAdminUser,
@@ -356,6 +357,34 @@ describe('admin account control requests', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
       confirmation: 'DELETE',
     });
+  });
+});
+
+describe('admin audit log requests', () => {
+  it('encodes read-only audit pagination and filters through the management API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ logs: [], limit: 25, offset: 0, hasMore: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      getAdminAuditLogs({
+        limit: 25,
+        offset: 0,
+        action: 'admin.user.status.update',
+        actorUserId: 'admin-1',
+        targetUserId: 'user-1',
+        from: '2026-09-01',
+        to: '2026-09-13',
+      }),
+    ).resolves.toMatchObject({ logs: [], hasMore: false });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/admin/audit-logs?limit=25&offset=0&action=admin.user.status.update&actorUserId=admin-1&targetUserId=user-1&from=2026-09-01&to=2026-09-13',
+    );
   });
 });
 

@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/auth';
 const {
   createAdminInvite,
   getAdminInvites,
+  getAdminAuditLogs,
   getAdminSettings,
   getAdminUsers,
   deleteAdminUser,
@@ -18,6 +19,7 @@ const {
 } = vi.hoisted(() => ({
   createAdminInvite: vi.fn(),
   deleteAdminUser: vi.fn(),
+  getAdminAuditLogs: vi.fn(),
   getAdminInvites: vi.fn(),
   getAdminSettings: vi.fn(),
   getAdminUsers: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('../api', () => ({
     cause instanceof Error ? cause.message : fallback,
   createAdminInvite,
   deleteAdminUser,
+  getAdminAuditLogs,
   getAdminInvites,
   getAdminSettings,
   getAdminUsers,
@@ -82,6 +85,18 @@ const managedUser = {
   },
 };
 
+const auditLog = {
+  id: 'audit-1',
+  actorUserId: 'admin-1',
+  targetUserId: 'user-1',
+  targetResource: 'user:user-1',
+  action: 'admin.user.status.update',
+  result: 'success' as const,
+  requestId: 'request-1',
+  metadata: { password: 'must-not-render' },
+  createdAt: 3,
+};
+
 beforeEach(() => {
   setActivePinia(createPinia());
   const auth = useAuthStore();
@@ -103,6 +118,7 @@ beforeEach(() => {
   getAdminUsers.mockResolvedValue({ users: [] });
   getAdminSettings.mockResolvedValue({ settings: { ...settings } });
   getAdminInvites.mockResolvedValue({ invites: [{ ...invite }] });
+  getAdminAuditLogs.mockResolvedValue({ logs: [], limit: 25, offset: 0, hasMore: false });
   updateAdminSettings.mockResolvedValue({
     settings: { ...settings, registrationMode: 'invite', enforceJoinIp: true },
   });
@@ -176,6 +192,55 @@ describe('AdminView registration controls', () => {
     expect(
       (wrapper.get('select[name="registration-mode"]').element as HTMLSelectElement).value,
     ).toBe('open');
+  });
+});
+
+describe('AdminView audit logs', () => {
+  it('renders read-only logs without metadata and reloads with action, actor, target, and date filters', async () => {
+    getAdminAuditLogs
+      .mockResolvedValueOnce({ logs: [{ ...auditLog }], limit: 25, offset: 0, hasMore: true })
+      .mockResolvedValueOnce({ logs: [], limit: 25, offset: 0, hasMore: false });
+    const wrapper = mount(AdminView);
+    await flushPromises();
+
+    expect(wrapper.get('[data-audit-id="audit-1"]').text()).toContain('admin.user.status.update');
+    expect(wrapper.text()).not.toContain('must-not-render');
+    expect(wrapper.find('[data-state="audit-next"]').exists()).toBeTruthy();
+
+    await wrapper.get('select[name="audit-action"]').setValue('admin.user.status.update');
+    await wrapper.get('input[name="audit-actor"]').setValue('admin-1');
+    await wrapper.get('input[name="audit-target"]').setValue('user-1');
+    await wrapper.get('input[name="audit-date-from"]').setValue('2026-09-01');
+    await wrapper.get('input[name="audit-date-to"]').setValue('2026-09-13');
+    await wrapper.get('form.admin-audit-filters').trigger('submit');
+    await flushPromises();
+
+    expect(getAdminAuditLogs).toHaveBeenLastCalledWith({
+      limit: 25,
+      offset: 0,
+      action: 'admin.user.status.update',
+      actorUserId: 'admin-1',
+      targetUserId: 'user-1',
+      from: '2026-09-01',
+      to: '2026-09-13',
+    });
+    expect(wrapper.find('[data-state="audit-empty"]').exists()).toBeTruthy();
+  });
+
+  it('shows audit loading and error states', async () => {
+    let rejectAudit!: (cause: Error) => void;
+    getAdminAuditLogs.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectAudit = reject;
+        }),
+    );
+    const wrapper = mount(AdminView);
+    expect(wrapper.get('[data-state="audit-loading"]')).toBeTruthy();
+
+    rejectAudit(new Error('audit unavailable'));
+    await flushPromises();
+    expect(wrapper.get('[data-state="audit-error"]').text()).toContain('audit unavailable');
   });
 });
 

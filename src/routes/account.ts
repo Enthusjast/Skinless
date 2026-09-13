@@ -53,6 +53,12 @@ import { serializeUser } from '../utils/serializers';
 import { generateUserId } from '../utils/uuid';
 import { clearWebSessionCookies } from '../utils/session';
 import type { AppEnv } from '../types';
+import {
+  AUDIT_ACTIONS,
+  recordAuditLog,
+  requestIdFromRequest,
+  type AuditLogEvent,
+} from '../audit';
 
 interface PasswordResetStartInput {
   email?: unknown;
@@ -103,6 +109,16 @@ const PASSWORD_RESET_PURPOSE = 'password_reset' as const;
 const EMAIL_CHANGE_PURPOSE = 'email_change' as const;
 
 const routes = new Hono<AppEnv>();
+
+async function writeAudit(
+  c: Context<AppEnv>,
+  event: Omit<AuditLogEvent, 'requestId'> & { requestId?: string | null },
+): Promise<void> {
+  await recordAuditLog(c.env.DB, {
+    ...event,
+    requestId: event.requestId ?? requestIdFromRequest(c.req.raw),
+  });
+}
 
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -546,6 +562,13 @@ routes.post('/auth/password/reset/verify', async (c) => {
   if (!updated) return invalidVerification(c);
   await deleteUserTokens(c.env.DB, challenge.user_id);
   await revokeUserWebSessions(c.env.DB, challenge.user_id, now);
+  await writeAudit(c, {
+    actorUserId: null,
+    targetUserId: challenge.user_id,
+    targetResource: `user:${challenge.user_id}`,
+    action: AUDIT_ACTIONS.ACCOUNT_PASSWORD_RESET,
+    result: 'success',
+  });
   return c.body(null, 204);
 });
 
@@ -648,6 +671,14 @@ routes.post('/user/deletion', authMiddleware, async (c) => {
   await revokeUserWebSessions(c.env.DB, user.id, now);
   await deleteUserServerSessions(c.env.DB, user.id);
   clearWebSessionCookies(c);
+  await writeAudit(c, {
+    actorUserId: user.id,
+    targetUserId: user.id,
+    targetResource: `user:${user.id}`,
+    action: AUDIT_ACTIONS.ACCOUNT_DELETION_REQUEST,
+    result: 'success',
+    metadata: { deletionAt },
+  });
   return c.json({
     challengeId,
     deletionAt,
@@ -695,7 +726,15 @@ routes.post('/auth/account/restore', async (c) => {
   }
 
   const restored = await restoreAccount(c.env.DB, challenge, now);
-  return restored ? c.body(null, 204) : invalidVerification(c);
+  if (!restored) return invalidVerification(c);
+  await writeAudit(c, {
+    actorUserId: null,
+    targetUserId: challenge.user_id,
+    targetResource: `user:${challenge.user_id}`,
+    action: AUDIT_ACTIONS.ACCOUNT_DELETION_RESTORE,
+    result: 'success',
+  });
+  return c.body(null, 204);
 });
 
 routes.post('/user/email/change/start', authMiddleware, async (c) => {
@@ -823,6 +862,13 @@ async function completeEmailChangeRoute(c: Context<AppEnv>): Promise<Response> {
   await revokeOtherWebSessions(c.env.DB, user.id, currentSession.id, now);
   const updatedUser = await findUserById(c.env.DB, user.id);
   if (!updatedUser) return invalidVerification(c);
+  await writeAudit(c, {
+    actorUserId: user.id,
+    targetUserId: user.id,
+    targetResource: `user:${user.id}`,
+    action: AUDIT_ACTIONS.ACCOUNT_EMAIL_CHANGE,
+    result: 'success',
+  });
   return c.json({ user: serializeUser(updatedUser, c.get('profile')) });
 }
 
