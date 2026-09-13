@@ -204,4 +204,155 @@ describe('AdminView account controls', () => {
     expect(wrapper.get('[data-status="disabled"]').text()).toContain('已禁用');
     expect(wrapper.get('[data-state="user-action-success"]').text()).toContain('已禁用');
   });
+
+  it('requires typed confirmation and exposes loading and success state while deleting', async () => {
+    getAdminUsers
+      .mockResolvedValueOnce({ users: [{ ...managedUser }] })
+      .mockResolvedValueOnce({ users: [] });
+    let finishDelete!: () => void;
+    deleteAdminUser.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDelete = resolve;
+        }),
+    );
+
+    const wrapper = mount(AdminView);
+    await flushPromises();
+    await wrapper.get('[data-action="open-user-actions"]').trigger('click');
+    await wrapper.get('[data-action="delete-user"]').trigger('click');
+    const confirm = wrapper.get('[data-action="confirm-user-action"]');
+    expect((confirm.element as HTMLButtonElement).disabled).toBe(true);
+    await wrapper.get('input[name="admin-confirmation"]').setValue('DELETE');
+    await confirm.trigger('click');
+    expect(confirm.text()).toContain('处理中…');
+    expect((confirm.element as HTMLButtonElement).disabled).toBe(true);
+
+    finishDelete();
+    await flushPromises();
+    expect(deleteAdminUser).toHaveBeenCalledWith('user-1', 'DELETE');
+    expect(wrapper.get('[data-state="user-action-success"]').text()).toContain('已永久删除');
+    expect(wrapper.text()).toContain('还没有用户');
+  });
+
+  it('keeps the confirmation dialog open and shows a failed deletion', async () => {
+    getAdminUsers.mockResolvedValueOnce({ users: [{ ...managedUser }] });
+    deleteAdminUser.mockRejectedValueOnce(new Error('delete unavailable'));
+
+    const wrapper = mount(AdminView);
+    await flushPromises();
+    await wrapper.get('[data-action="open-user-actions"]').trigger('click');
+    await wrapper.get('[data-action="delete-user"]').trigger('click');
+    await wrapper.get('input[name="admin-confirmation"]').setValue('DELETE');
+    await wrapper.get('[data-action="confirm-user-action"]').trigger('click');
+    await flushPromises();
+
+    expect(deleteAdminUser).toHaveBeenCalledWith('user-1', 'DELETE');
+    expect(wrapper.get('.admin-confirmation-modal [role="alert"]').text()).toContain(
+      'delete unavailable',
+    );
+    expect(wrapper.get('[data-action="confirm-user-action"]')).toBeTruthy();
+  });
+
+  it('keeps the confirmation dialog open and shows a failed session revocation', async () => {
+    getAdminUsers.mockResolvedValueOnce({ users: [{ ...managedUser }] });
+    revokeAdminUserSessions.mockRejectedValueOnce(new Error('session revoke failed'));
+
+    const wrapper = mount(AdminView);
+    await flushPromises();
+    await wrapper.get('[data-action="open-user-actions"]').trigger('click');
+    await wrapper.get('[data-action="revoke-user-sessions"]').trigger('click');
+    await wrapper.get('input[name="admin-confirmation"]').setValue('REVOKE');
+    await wrapper.get('[data-action="confirm-user-action"]').trigger('click');
+    await flushPromises();
+
+    expect(revokeAdminUserSessions).toHaveBeenCalledWith('user-1', 'REVOKE');
+    expect(wrapper.get('.admin-confirmation-modal [role="alert"]').text()).toContain(
+      'session revoke failed',
+    );
+    expect(wrapper.get('[data-action="confirm-user-action"]')).toBeTruthy();
+  });
+
+  it('revokes all sessions with typed confirmation and reports loading and success', async () => {
+    getAdminUsers
+      .mockResolvedValueOnce({ users: [{ ...managedUser }] })
+      .mockResolvedValueOnce({ users: [{ ...managedUser }] });
+    let finishRevoke!: () => void;
+    revokeAdminUserSessions.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRevoke = resolve;
+        }),
+    );
+
+    const wrapper = mount(AdminView);
+    await flushPromises();
+    await wrapper.get('[data-action="open-user-actions"]').trigger('click');
+    await wrapper.get('[data-action="revoke-user-sessions"]').trigger('click');
+    await wrapper.get('input[name="admin-confirmation"]').setValue('REVOKE');
+    const confirm = wrapper.get('[data-action="confirm-user-action"]');
+    await confirm.trigger('click');
+    expect(confirm.text()).toContain('处理中…');
+
+    finishRevoke();
+    await flushPromises();
+    expect(revokeAdminUserSessions).toHaveBeenCalledWith('user-1', 'REVOKE');
+    expect(wrapper.get('[data-state="user-action-success"]').text()).toContain('全部会话已撤销');
+  });
+
+  it('enables a disabled account without confirmation and reports loading and success', async () => {
+    const disabledUser = { ...managedUser, status: 'disabled' as const };
+    getAdminUsers
+      .mockResolvedValueOnce({ users: [disabledUser] })
+      .mockResolvedValueOnce({ users: [{ ...managedUser }] });
+    let finishEnable!: () => void;
+    updateAdminUserStatus.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishEnable = resolve;
+        }),
+    );
+
+    const wrapper = mount(AdminView);
+    await flushPromises();
+    await wrapper.get('[data-action="open-user-actions"]').trigger('click');
+    await wrapper.get('[data-action="enable-user"]').trigger('click');
+    const confirm = wrapper.get('[data-action="confirm-user-action"]');
+    expect((confirm.element as HTMLButtonElement).disabled).toBe(false);
+    await confirm.trigger('click');
+    expect(confirm.text()).toContain('处理中…');
+
+    finishEnable();
+    await flushPromises();
+    expect(updateAdminUserStatus).toHaveBeenCalledWith('user-1', 'active');
+    expect(wrapper.get('[data-state="user-action-success"]').text()).toContain('已启用');
+  });
+
+  it('demotes an administrator through typed confirmation and reports loading and success', async () => {
+    const managedAdmin = { ...managedUser, role: 'admin' as const };
+    getAdminUsers
+      .mockResolvedValueOnce({ users: [managedAdmin] })
+      .mockResolvedValueOnce({ users: [{ ...managedUser }] });
+    let finishDemote!: () => void;
+    updateUserRole.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDemote = resolve;
+        }),
+    );
+
+    const wrapper = mount(AdminView);
+    await flushPromises();
+    const roleSelect = wrapper.findAll('select[aria-label="修改 PlayerOne 的角色"]')[0];
+    await roleSelect.setValue('user');
+    await wrapper.get('input[name="admin-confirmation"]').setValue('DEMOTE');
+    const confirm = wrapper.get('[data-action="confirm-user-action"]');
+    await confirm.trigger('click');
+    expect(confirm.text()).toContain('处理中…');
+
+    finishDemote();
+    await flushPromises();
+    expect(updateUserRole).toHaveBeenCalledWith('user-1', 'user', 'DEMOTE');
+    expect(wrapper.get('[data-state="user-action-success"]').text()).toContain('移除管理员角色');
+  });
 });

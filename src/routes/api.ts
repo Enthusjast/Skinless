@@ -1068,11 +1068,19 @@ async function deleteAdminUserAccount(c: Context<AppEnv>): Promise<Response> {
   const userId = c.req.param('id') ?? '';
   const user = await findUserById(c.env.DB, userId);
   if (!user) return adminUserNotFound(c);
-  const deleted = await deleteAdminUserQuery(
-    c.env.DB,
-    userId,
-    Date.now() + TEXTURE_CLEANUP_DELAY_MS,
-  );
+  const now = Date.now();
+  let deleted: boolean;
+  try {
+    deleted = await deleteAdminUserQuery(
+      c.env.DB,
+      userId,
+      now + TEXTURE_CLEANUP_DELAY_MS,
+      now,
+    );
+  } catch (error) {
+    if (isConstraintViolation(error)) return adminMutationConflict(c, userId, c.get('user').id);
+    throw error;
+  }
   if (!deleted) return adminMutationConflict(c, userId, c.get('user').id);
   return c.body(null, 204);
 }

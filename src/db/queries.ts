@@ -1795,8 +1795,45 @@ export async function deleteAdminUser(
   db: D1Database,
   userId: string,
   textureCleanupScheduledAt: number,
+  updatedAt = Date.now(),
 ): Promise<boolean> {
   const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE registration_invites
+         SET created_by = (
+           SELECT replacement.id
+           FROM users replacement
+           WHERE replacement.role = 'admin'
+             AND replacement.status = 'active'
+             AND replacement.id <> ?
+           ORDER BY replacement.id
+           LIMIT 1
+         ),
+         updated_at = ?
+         WHERE created_by = ?
+           AND EXISTS (
+             SELECT 1 FROM users target
+             WHERE target.id = ?
+               AND (
+                 target.role <> 'admin'
+                 OR target.status <> 'active'
+                 OR EXISTS (
+                   SELECT 1 FROM users other
+                   WHERE other.role = 'admin'
+                     AND other.status = 'active'
+                     AND other.id <> target.id
+                 )
+               )
+               AND EXISTS (
+                 SELECT 1 FROM users replacement
+                 WHERE replacement.role = 'admin'
+                   AND replacement.status = 'active'
+                   AND replacement.id <> target.id
+               )
+           )`,
+      )
+      .bind(userId, updatedAt, userId, userId),
     db
       .prepare(
         `INSERT OR IGNORE INTO texture_cleanup
@@ -1822,7 +1859,19 @@ export async function deleteAdminUser(
                    AND other.id <> target.id
                )
              )
-         )`,
+             AND (
+               NOT EXISTS (
+                 SELECT 1 FROM registration_invites invite
+                 WHERE invite.created_by = target.id
+               )
+               OR EXISTS (
+                 SELECT 1 FROM users replacement
+                 WHERE replacement.role = 'admin'
+                   AND replacement.status = 'active'
+                   AND replacement.id <> target.id
+               )
+             )
+           )`,
       )
       .bind(textureCleanupScheduledAt, userId, userId, userId, userId),
     db
@@ -1837,12 +1886,24 @@ export async function deleteAdminUser(
                WHERE other.role = 'admin'
                  AND other.status = 'active'
                  AND other.id <> users.id
+               )
+           )
+           AND (
+             NOT EXISTS (
+               SELECT 1 FROM registration_invites invite
+               WHERE invite.created_by = users.id
+             )
+             OR EXISTS (
+               SELECT 1 FROM users replacement
+               WHERE replacement.role = 'admin'
+                 AND replacement.status = 'active'
+                 AND replacement.id <> users.id
              )
            )`,
       )
       .bind(userId),
   ]);
-  const userDelete = results[1] as { meta?: { changes?: number } } | undefined;
+  const userDelete = results[2] as { meta?: { changes?: number } } | undefined;
   return (userDelete?.meta?.changes ?? 0) > 0;
 }
 

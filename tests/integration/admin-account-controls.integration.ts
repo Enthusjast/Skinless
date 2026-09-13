@@ -82,6 +82,27 @@ describe('administrator account controls against real D1', () => {
   it('requires typed confirmation for disable and allows a disabled account to be re-enabled', async () => {
     const admin = await createAdmin();
     const target = await createAccount();
+    const now = Date.now();
+    const webSessionId = crypto.randomUUID();
+    const accessToken = `disable-target-token-${crypto.randomUUID()}`;
+    const serverId = `disable-target-server-${crypto.randomUUID()}`;
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO web_sessions
+         (id, user_id, refresh_token_hash, csrf_token_hash, device_label, created_at, last_used_at, expires_at, revoked_at)
+         VALUES (?, ?, 'refresh-hash', 'csrf-hash', 'test device', ?, ?, ?, NULL)`,
+      ).bind(webSessionId, target.id, now, now, now + 60_000),
+      env.DB.prepare(
+        `INSERT INTO tokens
+         (access_token, client_token, user_id, profile_id, created_at, expires_at)
+         VALUES (?, 'client', ?, ?, ?, ?)`,
+      ).bind(accessToken, target.id, target.profileId, now, now + 60_000),
+      env.DB.prepare(
+        `INSERT INTO server_sessions
+         (server_id, profile_id, user_id, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(serverId, target.profileId, target.id, now, now + 60_000),
+    ]);
 
     const missingConfirmation = await adminJsonRequest(
       `/api/admin/users/${target.id}/status`,
@@ -106,6 +127,12 @@ describe('administrator account controls against real D1', () => {
     });
     await expect(env.DB.prepare('SELECT status FROM users WHERE id = ?').bind(target.id).first())
       .resolves.toEqual({ status: 'disabled' });
+    await expect(env.DB.prepare('SELECT access_token FROM tokens WHERE user_id = ?').bind(target.id).first())
+      .resolves.toBeNull();
+    await expect(env.DB.prepare('SELECT server_id FROM server_sessions WHERE user_id = ?').bind(target.id).first())
+      .resolves.toBeNull();
+    await expect(env.DB.prepare('SELECT revoked_at FROM web_sessions WHERE id = ?').bind(webSessionId).first())
+      .resolves.toMatchObject({ revoked_at: expect.any(Number) });
 
     const loginWhileDisabled = await SELF.fetch('https://worker.test/api/auth/login', {
       method: 'POST',
@@ -137,8 +164,52 @@ describe('administrator account controls against real D1', () => {
     });
   });
 
+  it('rejects bearer and protocol authentication after an account enters pending deletion', async () => {
+    const target = await createAccount();
+    const accessTokenResponse = await SELF.fetch('https://worker.test/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: target.email,
+        password: 'correct-password',
+        clientToken: `pending-client-${crypto.randomUUID()}`,
+      }),
+    });
+    expect(accessTokenResponse.status).toBe(200);
+    const accessToken = (await accessTokenResponse.json() as { accessToken: string }).accessToken;
+    await env.DB.prepare(
+      "UPDATE users SET status = 'pending_deletion', deletion_requested_at = ? WHERE id = ?",
+    ).bind(Date.now() + 60_000, target.id).run();
+
+    const profile = await SELF.fetch('https://worker.test/api/user/profile', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    expect(profile.status).toBe(401);
+
+    const validation = await SELF.fetch('https://worker.test/authserver/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken }),
+    });
+    expect(validation.status).toBe(403);
+
+    const login = await SELF.fetch('https://worker.test/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: target.email, password: 'correct-password' }),
+    });
+    expect(login.status).toBe(403);
+  });
+
   it('protects the last active administrator from self-lockout, demotion, and deletion', async () => {
     const admin = await createAdmin();
+    const now = Date.now();
+    const inviteId = `guard-invite-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO registration_invites
+       (id, code_hash, code_prefix, created_by, use_count, use_limit, expires_at, note, revoked_at, created_at, updated_at)
+       VALUES (?, ?, 'guard', ?, 0, 1, NULL, 'Guard invite', NULL, ?, ?)`,
+    ).bind(inviteId, `hash-${crypto.randomUUID()}`, admin.userId, now, now).run();
 
     const disable = await adminJsonRequest(
       `/api/admin/users/${admin.userId}/status`,
@@ -166,6 +237,37 @@ describe('administrator account controls against real D1', () => {
     );
     expect(deletion.status).toBe(409);
     await expect(deletion.json()).resolves.toMatchObject({ errorCode: 'admin_self_lockout' });
+    await expect(env.DB.prepare(
+      'SELECT created_by FROM registration_invites WHERE id = ?',
+    ).bind(inviteId).first()).resolves.toEqual({ created_by: admin.userId });
+  });
+
+  it('reassigns invites before deleting their creator', async () => {
+    const admin = await createAdmin();
+    const target = await createAccount();
+    const now = Date.now();
+    const inviteId = `invite-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO registration_invites
+       (id, code_hash, code_prefix, created_by, use_count, use_limit, expires_at, note, revoked_at, created_at, updated_at)
+       VALUES (?, ?, 'reassign', ?, 0, 1, NULL, 'Owned by target', NULL, ?, ?)`,
+    ).bind(inviteId, `hash-${crypto.randomUUID()}`, target.id, now, now).run();
+
+    const deleted = await adminJsonRequest(
+      `/api/admin/users/${target.id}`,
+      admin.accessToken,
+      'DELETE',
+      { confirmation: 'DELETE' },
+    );
+    expect(deleted.status).toBe(204);
+    await expect(env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(target.id).first())
+      .resolves.toBeNull();
+    await expect(env.DB.prepare(
+      'SELECT created_by, revoked_at FROM registration_invites WHERE id = ?',
+    ).bind(inviteId).first()).resolves.toEqual({
+      created_by: admin.userId,
+      revoked_at: null,
+    });
   });
 
   it('revokes a target account’s web, protocol, and server sessions after confirmation', async () => {
