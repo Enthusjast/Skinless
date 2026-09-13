@@ -82,7 +82,13 @@ import {
 } from '../utils/serializers';
 import { normalizePng, type AssetKind } from '../utils/png';
 import { generateProfileId, generateUserId } from '../utils/uuid';
-import { getTextureUrl } from '../utils/config';
+import {
+  getPublicBaseUrl,
+  getTextureUrl,
+  getYggdrasilPublicKeyPem,
+  isSameOrigin,
+  metadata,
+} from '../utils/config';
 import {
   isTextureModelCompatible,
   MAX_TEXTURES_PER_USER,
@@ -883,6 +889,42 @@ routes.get('/user/profile', authMiddleware, (c) => {
     user: serializeUser(c.get('user'), c.get('profile')),
     ...profiles,
   }));
+});
+
+routes.get('/user/diagnostics', authMiddleware, async (c) => {
+  const profile = c.get('profile');
+  const settings = await findSiteSettings(c.env.DB);
+  let textureAvailable = false;
+
+  if (profile.skin_hash) {
+    try {
+      textureAvailable = (await c.env.BUCKET.head(`${profile.skin_hash}.png`)) !== null;
+    } catch {
+      textureAvailable = false;
+    }
+  }
+
+  const authServerUrl = `${getPublicBaseUrl(c)}/api/yggdrasil`;
+  return c.json({
+    version: c.env.IMPLEMENTATION_VERSION ?? '0.1.0',
+    authServerUrl,
+    javaAgentArgument: `-javaagent:authlib-injector.jar=${authServerUrl}`,
+    metadataUrl: authServerUrl,
+    metadataReachable: metadata(c).ok,
+    publicKeyConfigured: Boolean(getYggdrasilPublicKeyPem(c.env)),
+    textureDomainConfigured: Boolean(
+      c.env.SKIN_DOMAIN?.split(',').some((domain) => domain.trim().length > 0),
+    ),
+    profileAvailable: true,
+    textureAvailable,
+    sameOrigin: isSameOrigin(c),
+    ipBindingEnabled: settings?.enforce_join_ip === 1,
+    profile: {
+      id: profile.id,
+      name: profile.name,
+      textureUrl: profile.skin_hash ? getTextureUrl(c, profile.skin_hash) : null,
+    },
+  });
 });
 
 async function ownedProfile(c: Context<AppEnv>, profileId: string | undefined): Promise<ProfileRecord | null> {

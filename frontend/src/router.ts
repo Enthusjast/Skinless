@@ -42,6 +42,16 @@ const router = createRouter({
           },
         },
         {
+          path: 'dashboard/setup',
+          component: () => import('./views/SetupView.vue'),
+          meta: {
+            requiresAuth: true,
+            title: '启动器设置',
+            eyebrow: 'LAUNCHER SETUP',
+            description: '复制启动器参数并检查当前部署。',
+          },
+        },
+        {
           path: 'admin',
           component: () => import('./views/AdminView.vue'),
           meta: {

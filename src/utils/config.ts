@@ -11,7 +11,16 @@ function cleanDomain(value: string): string {
 
 export function getPublicBaseUrl(c: Context<AppEnv>): string {
   const configured = c.env.API_BASE_URL?.trim();
-  if (configured) return trimTrailingSlash(configured);
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      url.username = '';
+      url.password = '';
+      return trimTrailingSlash(url.toString());
+    } catch {
+      return trimTrailingSlash(configured);
+    }
+  }
   return new URL(c.req.url).origin;
 }
 
@@ -23,6 +32,19 @@ export function getSkinDomains(c: Context<AppEnv>): string[] {
 
 export function getTextureUrl(c: Context<AppEnv>, hash: string): string {
   return `${getPublicBaseUrl(c)}/textures/${hash}`;
+}
+
+export function isSameOrigin(c: Context<AppEnv>): boolean {
+  const configured = c.env.API_BASE_URL?.trim();
+  if (!configured) return true;
+
+  try {
+    const configuredOrigin = new URL(configured).origin;
+    const requestOrigin = c.req.header('Origin')?.trim() || new URL(c.req.url).origin;
+    return new URL(requestOrigin).origin === configuredOrigin;
+  } catch {
+    return false;
+  }
 }
 
 export function getYggdrasilPrivateKeyPem(bindings: Bindings): string | null {

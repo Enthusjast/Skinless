@@ -161,6 +161,25 @@ export interface AdminAuditLogFilters {
   to?: string;
 }
 
+export interface LauncherDiagnostics {
+  version: string;
+  authServerUrl: string;
+  javaAgentArgument: string;
+  metadataUrl: string;
+  metadataReachable: boolean;
+  publicKeyConfigured: boolean;
+  textureDomainConfigured: boolean;
+  profileAvailable: boolean;
+  textureAvailable: boolean;
+  sameOrigin: boolean;
+  ipBindingEnabled: boolean;
+  profile: {
+    id: string | null;
+    name: string | null;
+    textureUrl: string | null;
+  };
+}
+
 export class ApiError extends Error {
   public constructor(
     public readonly status: number,
@@ -451,6 +470,10 @@ export function logout(): Promise<void> {
 
 export function getUserProfile(): Promise<{ user: ApiUser } & ProfileCollection> {
   return managementRequest<{ user: ApiUser } & ProfileCollection>('/api/user/profile');
+}
+
+export function getDiagnostics(): Promise<LauncherDiagnostics> {
+  return managementRequest<LauncherDiagnostics>('/api/user/diagnostics');
 }
 
 export function getProfiles(): Promise<ProfileCollection> {

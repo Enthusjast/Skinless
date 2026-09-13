@@ -6,6 +6,7 @@ import {
   LogOut,
   Menu,
   Palette,
+  Settings2,
   Shield,
   UserRound,
   X,
@@ -101,6 +102,14 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick));
           @click="sidebarOpen = false"
         >
           <UserRound :size="18" aria-hidden="true" /><span>账户安全</span>
+        </RouterLink>
+        <RouterLink
+          class="workspace-nav-link"
+          to="/dashboard/setup"
+          :class="{ active: route.path === '/dashboard/setup' }"
+          @click="sidebarOpen = false"
+        >
+          <Settings2 :size="18" aria-hidden="true" /><span>启动器设置</span>
         </RouterLink>
         <template v-if="auth.isAdmin">
           <p class="workspace-nav-label workspace-nav-label-spaced">管理</p>

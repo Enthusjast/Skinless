@@ -304,6 +304,9 @@ async function registeredClient() {
     SKIN_DOMAIN: 'skin.example.com',
     ENVIRONMENT: 'development',
     YGGDRASIL_ALLOW_UNSIGNED_TEXTURES: 'true',
+    YGGDRASIL_PRIVATE_KEY_PEM: undefined as string | undefined,
+    YGGDRASIL_PUBLIC_KEY_PEM: undefined as string | undefined,
+    IMPLEMENTATION_VERSION: undefined as string | undefined,
   };
   const user: UserRecord = {
     id: 'user-1',
@@ -488,5 +491,49 @@ describe('management API', () => {
     expect(body.users).toHaveLength(1);
     expect(body.users[0]).not.toHaveProperty('password');
     expect(body.users[0]).toMatchObject({ email: 'player@example.com', role: 'admin' });
+  });
+
+  it('returns safe launcher setup diagnostics only for authenticated users', async () => {
+    const { env, token } = await registeredClient();
+    env.API_BASE_URL = 'https://diagnostic-user:diagnostic-password@skin.example.com';
+    env.YGGDRASIL_PRIVATE_KEY_PEM = 'private-key-must-not-leak';
+    env.YGGDRASIL_PUBLIC_KEY_PEM = 'public-key-is-only-a-configuration-fact';
+    env.IMPLEMENTATION_VERSION = '2.1.0';
+
+    const unauthenticated = await app.request('/api/user/diagnostics', {}, env);
+    expect(unauthenticated.status).toBe(401);
+
+    const response = await app.request(
+      '/api/user/diagnostics',
+      { headers: { Authorization: `Bearer ${token}` } },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown> & {
+      profile: Record<string, unknown>;
+    };
+    expect(body).toMatchObject({
+      version: '2.1.0',
+      authServerUrl: 'https://skin.example.com/api/yggdrasil',
+      javaAgentArgument: '-javaagent:authlib-injector.jar=https://skin.example.com/api/yggdrasil',
+      metadataUrl: 'https://skin.example.com/api/yggdrasil',
+      metadataReachable: true,
+      publicKeyConfigured: true,
+      textureDomainConfigured: true,
+      profileAvailable: true,
+      textureAvailable: false,
+      ipBindingEnabled: false,
+      profile: {
+        id: 'profile-1',
+        name: 'PlayerOne',
+        textureUrl: null,
+      },
+    });
+    expect(typeof body.sameOrigin).toBe('boolean');
+    expect(JSON.stringify(body)).not.toContain('private-key-must-not-leak');
+    expect(JSON.stringify(body)).not.toContain('public-key-is-only-a-configuration-fact');
+    expect(JSON.stringify(body)).not.toContain('diagnostic-password');
+    expect(JSON.stringify(body)).not.toMatch(/password|token|secret|header|ipAddress/i);
   });
 });

@@ -5,6 +5,7 @@ import {
   createAdminInvite,
   completeEmailChange,
   formatApiError,
+  getDiagnostics,
   getAdminInvites,
   getAdminAuditLogs,
   getAdminSettings,
@@ -185,6 +186,43 @@ describe('management session requests', () => {
       message: 'still expired',
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('launcher diagnostics requests', () => {
+  it('loads setup diagnostics through the same-origin management session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          version: '2.1.0',
+          authServerUrl: 'https://skin.example.com/api/yggdrasil',
+          javaAgentArgument:
+            '-javaagent:authlib-injector.jar=https://skin.example.com/api/yggdrasil',
+          metadataUrl: 'https://skin.example.com/api/yggdrasil',
+          metadataReachable: true,
+          publicKeyConfigured: true,
+          textureDomainConfigured: true,
+          profileAvailable: true,
+          textureAvailable: false,
+          sameOrigin: true,
+          ipBindingEnabled: false,
+          profile: { id: 'profile-1', name: 'PlayerOne', textureUrl: null },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getDiagnostics()).resolves.toMatchObject({
+      version: '2.1.0',
+      profile: { id: 'profile-1', name: 'PlayerOne' },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/user/diagnostics',
+      expect.objectContaining({
+        credentials: 'same-origin',
+      }),
+    );
   });
 });
 
