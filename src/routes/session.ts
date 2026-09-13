@@ -103,12 +103,11 @@ routes.get('/sessionserver/session/minecraft/hasJoined', async (c) => {
 routes.post('/sessionserver/session/minecraft/join', async (c) => {
   const body = await readJson<JoinRequest>(c);
   const accessToken = typeof body?.accessToken === 'string' && body.accessToken.trim() ? body.accessToken.trim() : null;
-  const selectedProfile = typeof body?.selectedProfile === 'object' && body.selectedProfile !== null
-    ? (body.selectedProfile as { id?: unknown }).id
+  const profileId = typeof body?.selectedProfile === 'string' && body.selectedProfile.trim()
+    ? body.selectedProfile.trim()
     : null;
-  const profileId = typeof selectedProfile === 'string' && selectedProfile.trim() ? selectedProfile.trim() : null;
   const serverId = typeof body?.serverId === 'string' && body.serverId.length <= 256 ? body.serverId : null;
-  if (!accessToken || !profileId || serverId === null) return yggError(c, 400, 'accessToken, selectedProfile.id and serverId are required.');
+  if (!accessToken || !profileId || serverId === null) return yggError(c, 400, 'accessToken, selectedProfile and serverId are required.');
 
   const token = await findTokenContext(c.env.DB, accessToken);
   if (!token || token.profile_id !== profileId) return yggError(c, 403, 'Invalid token or selected profile.');

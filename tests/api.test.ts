@@ -369,7 +369,7 @@ describe('management API', () => {
     expect(reapply.status).toBe(200);
     expect(bucket.files.has(`${uploadBody.hash}.png`)).toBe(true);
 
-    const join = await app.request('/sessionserver/session/minecraft/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: token, selectedProfile: { id: joinedProfile.id }, serverId: 'smoke-server' }) }, env);
+    const join = await app.request('/sessionserver/session/minecraft/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken: token, selectedProfile: joinedProfile.id, serverId: 'smoke-server' }) }, env);
     expect(join.status).toBe(204);
     const hasJoined = await app.request('/sessionserver/session/minecraft/hasJoined?username=PlayerOne&serverId=smoke-server', {}, env);
     expect(hasJoined.status).toBe(200);
@@ -393,7 +393,7 @@ describe('management API', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accessToken: token,
-        selectedProfile: { id: 'profile-1' },
+        selectedProfile: 'profile-1',
         serverId: 'guarded-server',
       }),
     }, env);
