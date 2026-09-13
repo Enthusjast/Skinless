@@ -619,7 +619,10 @@ routes.post('/auth/login', async (c) => {
     expires_at: now + WEB_SESSION_TTL_MS,
     revoked_at: null,
   };
-  await insertWebSession(c.env.DB, session);
+  const inserted = await insertWebSession(c.env.DB, session);
+  if (!inserted) {
+    return jsonError(c, 401, 'Invalid email or password.', 'Unauthorized');
+  }
 
   const accessExpiresAt = now + ACCESS_TOKEN_TTL_MS;
   const accessValue = await createAccessCookieValue({ sessionId, userId: user.id, expiresAt: accessExpiresAt }, secret);

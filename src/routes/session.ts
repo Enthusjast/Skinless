@@ -59,13 +59,14 @@ routes.post('/sessionserver/session/minecraft/join', async (c) => {
   if (!token || token.profile_id !== profileId) return yggError(c, 403, 'Invalid token or selected profile.');
 
   const now = Date.now();
-  await createServerSession(c.env.DB, {
+  const created = await createServerSession(c.env.DB, {
     server_id: serverId,
     profile_id: profileId,
     user_id: token.user_id,
     created_at: now,
     expires_at: Math.min(token.expires_at, now + SERVER_SESSION_TTL_MS),
   });
+  if (!created) return yggError(c, 403, 'Invalid token or selected profile.');
   return c.body(null, 204);
 });
 

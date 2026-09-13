@@ -70,6 +70,7 @@ class MemoryD1 {
   public profiles = new Map<string, ProfileRecord>();
   public tokens = new Map<string, TokenRecord>();
   public sessions = new Map<string, { serverId: string; profileId: string; userId: string; expiresAt: number }>();
+  public failServerSessionIssuance = false;
   public textures = new Map<string, TextureWardrobeRecord>();
   public cleanups = new Map<string, { scheduledAt: number }>();
 
@@ -178,6 +179,7 @@ class MemoryD1 {
       this.tokens.set(String(access_token), { access_token: String(access_token), client_token: String(client_token), user_id: String(user_id), profile_id: String(profile_id), created_at: Number(created_at), expires_at: Number(expires_at) });
       return 1;
     } else if (sql.startsWith('INSERT INTO server_sessions')) {
+      if (this.failServerSessionIssuance) return 0;
       const [serverId, profileId, userId, _createdAt, expiresAt] = values;
       this.sessions.set(String(serverId), { serverId: String(serverId), profileId: String(profileId), userId: String(userId), expiresAt: Number(expiresAt) });
       return 1;
@@ -370,6 +372,28 @@ describe('management API', () => {
     expect(remove.status).toBe(204);
     expect(bucket.files.size).toBe(1);
     expect(db.cleanups.size).toBe(0);
+  });
+
+  it('returns a generic forbidden error when server-session issuance is rejected', async () => {
+    const { db, env, token } = await registeredClient();
+    db.failServerSessionIssuance = true;
+
+    const response = await app.request('/sessionserver/session/minecraft/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accessToken: token,
+        selectedProfile: { id: 'profile-1' },
+        serverId: 'guarded-server',
+      }),
+    }, env);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'ForbiddenOperationException',
+      errorMessage: 'Invalid token or selected profile.',
+    });
+    expect(db.sessions.size).toBe(0);
   });
 
   it('rejects unsupported formats, invalid dimensions, fake headers, and truncated PNGs with stable codes', async () => {

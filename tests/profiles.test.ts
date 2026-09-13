@@ -45,8 +45,7 @@ class ProfileDatabase {
   }
 
   batch(statements: ProfileStatement[]): Promise<unknown[]> {
-    statements.forEach((statement) => statement.execute());
-    return Promise.resolve([]);
+    return Promise.all(statements.map((statement) => statement.run()));
   }
 
   first(sql: string, values: unknown[]): Row | null {

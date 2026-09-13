@@ -5,9 +5,18 @@ import {
   ACCOUNT_DELETION_GRACE_PERIOD_MS,
   ACCOUNT_RESTORE_PURPOSE,
 } from '../../src/utils/account';
-import { startAccountDeletion } from '../../src/db/queries';
+import {
+  createServerSession,
+  insertToken,
+  insertWebSession,
+  rotateToken,
+  rotateWebSession,
+  restoreAccount,
+  startAccountDeletion,
+} from '../../src/db/queries';
 import { sha256Hex } from '../../src/utils/crypto';
 import { registerVerifiedAccount } from './verified-registration-fixture';
+import type { TokenRecord, WebSessionRecord } from '../../src/types';
 
 const PASSWORD = 'correct-password';
 
@@ -355,6 +364,116 @@ describe('recoverable account deletion against real D1', () => {
       `/sessionserver/session/minecraft/hasJoined?username=${encodeURIComponent(account.profile.name)}&serverId=${encodeURIComponent(serverId)}`,
       {},
       bindings,
+    );
+    expect(hasJoined.status).toBe(204);
+  });
+
+  it('rejects stale auth issuance after deletion begins and leaves no session to revive', async () => {
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+    const email = `issuance-overlap-${suffix}@example.com`;
+    const account = await registerVerifiedAccount(email, PASSWORD, `Iss${suffix}`);
+    await webLogin(email, PASSWORD);
+    const authenticate = await request('/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: email, password: PASSWORD, clientToken: `client-${suffix}` }),
+    });
+    expect(authenticate.status).toBe(200);
+    const accessToken = (await authenticate.json() as { accessToken: string }).accessToken;
+    const webSession = await env.DB.prepare(
+      'SELECT * FROM web_sessions WHERE user_id = ? LIMIT 1',
+    ).bind(account.id).first<WebSessionRecord>();
+    expect(webSession).not.toBeNull();
+
+    const now = Date.now();
+    const challenge = {
+      id: crypto.randomUUID(),
+      user_id: account.id,
+      purpose: ACCOUNT_RESTORE_PURPOSE,
+      email,
+      code_hash: await sha256Hex(new TextEncoder().encode('123456')),
+      attempts: 0,
+      last_sent_at: now,
+      expires_at: now + ACCOUNT_DELETION_GRACE_PERIOD_MS,
+      created_at: now,
+      updated_at: now,
+    } as const;
+    expect(await startAccountDeletion(
+      env.DB,
+      account.id,
+      challenge.expires_at,
+      challenge,
+    )).toBe(true);
+
+    const staleToken: TokenRecord = {
+      access_token: `stale-${suffix}`,
+      client_token: `stale-client-${suffix}`,
+      user_id: account.id,
+      profile_id: account.profile.id,
+      created_at: now,
+      expires_at: now + 60_000,
+    };
+    expect(await insertToken(env.DB, staleToken)).toBe(false);
+    await expect(env.DB.prepare(
+      'SELECT access_token FROM tokens WHERE access_token = ?',
+    ).bind(staleToken.access_token).first()).resolves.toBeNull();
+
+    const rotatedToken: TokenRecord = {
+      ...staleToken,
+      access_token: `rotated-${suffix}`,
+    };
+    expect(await rotateToken(env.DB, accessToken, rotatedToken)).toBe(false);
+    await expect(env.DB.prepare(
+      'SELECT access_token FROM tokens WHERE access_token IN (?, ?)',
+    ).bind(accessToken, rotatedToken.access_token).all()).resolves.toMatchObject({ results: [] });
+
+    const staleWebSession: WebSessionRecord = {
+      id: `stale-web-${suffix}`,
+      user_id: account.id,
+      refresh_token_hash: `refresh-${suffix}`,
+      csrf_token_hash: `csrf-${suffix}`,
+      device_label: 'stale',
+      created_at: now,
+      last_used_at: now,
+      expires_at: now + 60_000,
+      revoked_at: null,
+    };
+    expect(await insertWebSession(env.DB, staleWebSession)).toBe(false);
+    await expect(env.DB.prepare(
+      'SELECT id FROM web_sessions WHERE id = ?',
+    ).bind(staleWebSession.id).first()).resolves.toBeNull();
+
+    expect(await rotateWebSession(
+      env.DB,
+      webSession!.id,
+      webSession!.refresh_token_hash,
+      `next-refresh-${suffix}`,
+      `next-csrf-${suffix}`,
+      now + 1,
+    )).toBe(false);
+    const unchangedWebSession = await env.DB.prepare(
+      'SELECT refresh_token_hash, csrf_token_hash FROM web_sessions WHERE id = ?',
+    ).bind(webSession!.id).first<{ refresh_token_hash: string; csrf_token_hash: string }>();
+    expect(unchangedWebSession).toEqual({
+      refresh_token_hash: webSession!.refresh_token_hash,
+      csrf_token_hash: webSession!.csrf_token_hash,
+    });
+
+    const serverId = `stale-server-${suffix}`;
+    expect(await createServerSession(env.DB, {
+      server_id: serverId,
+      profile_id: account.profile.id,
+      user_id: account.id,
+      created_at: now,
+      expires_at: now + 60_000,
+    })).toBe(false);
+    await expect(env.DB.prepare(
+      'SELECT server_id FROM server_sessions WHERE server_id = ? AND profile_id = ?',
+    ).bind(serverId, account.profile.id).first()).resolves.toBeNull();
+
+    expect(await restoreAccount(env.DB, challenge, Date.now())).toBe(true);
+    const hasJoined = await request(
+      `/sessionserver/session/minecraft/hasJoined?username=${encodeURIComponent(account.profile.name)}&serverId=${encodeURIComponent(serverId)}`,
     );
     expect(hasJoined.status).toBe(204);
   });

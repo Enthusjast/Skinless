@@ -338,11 +338,15 @@ export async function deleteProfile(
 export async function insertToken(
   db: D1Database,
   token: TokenRecord,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const result = await db
     .prepare(
       `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       SELECT ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM users
+         WHERE id = ? AND status = 'active'
+       )`,
     )
     .bind(
       token.access_token,
@@ -351,21 +355,27 @@ export async function insertToken(
       token.profile_id,
       token.created_at,
       token.expires_at,
+      token.user_id,
     )
     .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function rotateToken(
   db: D1Database,
   previous: string,
   token: TokenRecord,
-): Promise<void> {
-  await db.batch([
+): Promise<boolean> {
+  const results = await db.batch([
     db.prepare("DELETE FROM tokens WHERE access_token = ?").bind(previous),
     db
       .prepare(
         `INSERT INTO tokens (access_token, client_token, user_id, profile_id, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         SELECT ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM users
+           WHERE id = ? AND status = 'active'
+         )`,
       )
       .bind(
         token.access_token,
@@ -374,8 +384,11 @@ export async function rotateToken(
         token.profile_id,
         token.created_at,
         token.expires_at,
+        token.user_id,
       ),
   ]);
+  const tokenInsert = results[1] as { meta?: { changes?: number } } | undefined;
+  return (tokenInsert?.meta?.changes ?? 0) > 0;
 }
 
 export async function deleteToken(
@@ -408,12 +421,16 @@ export async function deleteUserServerSessions(
 export async function insertWebSession(
   db: D1Database,
   session: WebSessionRecord,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const result = await db
     .prepare(
       `INSERT INTO web_sessions
        (id, user_id, refresh_token_hash, csrf_token_hash, device_label, created_at, last_used_at, expires_at, revoked_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM users
+         WHERE id = ? AND status = 'active'
+       )`,
     )
     .bind(
       session.id,
@@ -425,8 +442,10 @@ export async function insertWebSession(
       session.last_used_at,
       session.expires_at,
       session.revoked_at,
+      session.user_id,
     )
     .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function findWebSessionById(
@@ -451,11 +470,15 @@ export async function rotateWebSession(
     .prepare(
       `UPDATE web_sessions
        SET refresh_token_hash = ?, csrf_token_hash = ?, last_used_at = ?
-       WHERE id = ? AND refresh_token_hash = ? AND revoked_at IS NULL`,
+       WHERE id = ? AND refresh_token_hash = ? AND revoked_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM users
+           WHERE users.id = web_sessions.user_id AND users.status = 'active'
+         )`,
     )
     .bind(refreshTokenHash, csrfTokenHash, lastUsedAt, id, previousRefreshHash)
     .run();
-  return (result.meta?.changes ?? 1) > 0;
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function touchWebSession(
@@ -1362,11 +1385,15 @@ export async function revokeOtherWebSessions(
 export async function createServerSession(
   db: D1Database,
   session: ServerSessionRecord,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const result = await db
     .prepare(
       `INSERT INTO server_sessions (server_id, profile_id, user_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?)
+       SELECT ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM users
+         WHERE id = ? AND status = 'active'
+       )
        ON CONFLICT (server_id, profile_id) DO UPDATE SET
          user_id = excluded.user_id,
          created_at = excluded.created_at,
@@ -1378,8 +1405,10 @@ export async function createServerSession(
       session.user_id,
       session.created_at,
       session.expires_at,
+      session.user_id,
     )
     .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function findJoinedProfile(

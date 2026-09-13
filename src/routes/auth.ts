@@ -144,7 +144,8 @@ routes.post('/authserver/authenticate', async (c) => {
     created_at: now,
     expires_at: now + getTokenExpiryMs(c),
   };
-  await insertToken(c.env.DB, token);
+  const inserted = await insertToken(c.env.DB, token);
+  if (!inserted) return invalidCredentials(c);
   await clearLoginFailuresDistributed(c.env, clientKey);
   return c.json(tokenResponse(token, profile, profiles.length > 0 ? profiles : [profile], user, body?.requestUser === true));
 });
@@ -173,7 +174,8 @@ routes.post('/authserver/refresh', async (c) => {
     created_at: now,
     expires_at: now + getTokenExpiryMs(c),
   };
-  await rotateToken(c.env.DB, result.accessToken, token);
+  const rotated = await rotateToken(c.env.DB, result.accessToken, token);
+  if (!rotated) return yggError(c, 403, 'Invalid token.');
   const user: UserRecord = {
     id: result.context.user_id,
     email: result.context.user_email,

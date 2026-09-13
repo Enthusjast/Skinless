@@ -34,6 +34,7 @@ class SessionD1 {
   public users = new Map<string, UserRecord>();
   public profiles = new Map<string, ProfileRecord>();
   public webSessions = new Map<string, WebSessionRecord>();
+  public failWebSessionIssuance = false;
 
   prepare(sql: string): Statement {
     return new Statement(this, sql.replace(/\s+/g, ' ').trim());
@@ -71,6 +72,7 @@ class SessionD1 {
 
   run(sql: string, values: unknown[]): number {
     if (sql.startsWith('INSERT INTO web_sessions')) {
+      if (this.failWebSessionIssuance) return 0;
       const [id, userId, refreshHash, csrfHash, deviceLabel, createdAt, lastUsedAt, expiresAt, revokedAt] = values;
       this.webSessions.set(String(id), {
         id: String(id),
@@ -86,6 +88,7 @@ class SessionD1 {
       return 1;
     }
     if (sql.startsWith('UPDATE web_sessions SET refresh_token_hash')) {
+      if (this.failWebSessionIssuance) return 0;
       const [refreshHash, csrfHash, lastUsedAt, id, previousRefreshHash] = values;
       const session = this.webSessions.get(String(id));
       if (!session || session.revoked_at !== null || session.refresh_token_hash !== previousRefreshHash) return 0;
@@ -221,6 +224,51 @@ describe('secure web sessions', () => {
     expect(setCookie).toContain('SameSite=Strict');
     expect(setCookie).toContain('Path=/');
     expect(setCookie).toContain('skinless_csrf=');
+  });
+
+  it('returns a generic auth error when guarded web-session issuance is rejected', async () => {
+    const { db, env } = await createEnv();
+    db.failWebSessionIssuance = true;
+
+    const response = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: user.email, password: 'correct-password' }),
+    }, env);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Unauthorized',
+      errorMessage: 'Invalid email or password.',
+      errorCode: 'unauthorized',
+    });
+    expect(db.webSessions.size).toBe(0);
+  });
+
+  it('returns a generic session error when guarded web-session refresh is rejected', async () => {
+    const { db, env } = await createEnv();
+    const login = await app.request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: user.email, password: 'correct-password' }),
+    }, env);
+    const setCookie = login.headers.get('set-cookie') ?? '';
+    db.failWebSessionIssuance = true;
+
+    const refresh = await app.request('/api/auth/refresh', {
+      method: 'POST',
+      headers: {
+        Cookie: cookieHeader(setCookie),
+        'X-CSRF-Token': (await login.json() as { csrfToken: string }).csrfToken,
+      },
+    }, env);
+
+    expect(refresh.status).toBe(401);
+    await expect(refresh.json()).resolves.toMatchObject({
+      error: 'Unauthorized',
+      errorMessage: 'The web session is invalid or expired.',
+      errorCode: 'unauthorized',
+    });
   });
 
   it('does not count malformed requests toward the five-attempt window', async () => {

@@ -25,9 +25,8 @@ class FakeD1Statement {
     return Promise.resolve({ results: this.database.all(this.sql, this.values) as T[] });
   }
 
-  run(): Promise<{ success: true }> {
-    this.database.run(this.sql, this.values);
-    return Promise.resolve({ success: true });
+  run(): Promise<{ success: true; meta: { changes: number } }> {
+    return Promise.resolve({ success: true, meta: { changes: this.database.run(this.sql, this.values) } });
   }
 
   execute(): void {
@@ -39,14 +38,14 @@ class FakeD1 {
   public users = new Map<string, UserRecord>();
   public profiles = new Map<string, ProfileRecord>();
   public tokens = new Map<string, TokenRecord>();
+  public failTokenIssuance = false;
 
   prepare(sql: string): FakeD1Statement {
     return new FakeD1Statement(this, sql.replace(/\s+/g, ' ').trim());
   }
 
   batch(statements: FakeD1Statement[]): Promise<unknown[]> {
-    statements.forEach((statement) => statement.execute());
-    return Promise.resolve([]);
+    return Promise.all(statements.map((statement) => statement.run()));
   }
 
   first(sql: string, values: unknown[]): Row | null {
@@ -89,8 +88,9 @@ class FakeD1 {
     return [];
   }
 
-  run(sql: string, values: unknown[]): void {
+  run(sql: string, values: unknown[]): number {
     if (sql.startsWith('INSERT INTO tokens')) {
+      if (this.failTokenIssuance) return 0;
       const [access_token, client_token, user_id, profile_id, created_at, expires_at] = values;
       this.tokens.set(String(access_token), {
         access_token: String(access_token),
@@ -100,13 +100,21 @@ class FakeD1 {
         created_at: Number(created_at),
         expires_at: Number(expires_at),
       });
+      return 1;
     } else if (sql.startsWith('DELETE FROM tokens WHERE access_token')) {
-      this.tokens.delete(String(values[0]));
+      const existed = this.tokens.delete(String(values[0]));
+      return existed ? 1 : 0;
     } else if (sql.startsWith('DELETE FROM tokens WHERE user_id')) {
+      let changes = 0;
       for (const [key, token] of this.tokens) {
-        if (token.user_id === values[0]) this.tokens.delete(key);
+        if (token.user_id === values[0]) {
+          this.tokens.delete(key);
+          changes += 1;
+        }
       }
+      return changes;
     }
+    return 0;
   }
 }
 
@@ -204,6 +212,47 @@ describe('Yggdrasil authentication API', () => {
     }, env);
     expect(invalidate.status).toBe(204);
     expect(db.tokens.size).toBe(0);
+  });
+
+  it('returns generic forbidden errors when guarded token issuance is rejected', async () => {
+    const { db, env } = await createEnv();
+    db.failTokenIssuance = true;
+
+    const response = await app.request('/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user.email, password: 'correct-password' }),
+    }, env);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'ForbiddenOperationException',
+      errorMessage: 'Invalid credentials. Invalid username or password.',
+    });
+    expect(db.tokens.size).toBe(0);
+  });
+
+  it('returns a generic invalid-token error when guarded token refresh is rejected', async () => {
+    const { db, env } = await createEnv();
+    const authenticate = await app.request('/authserver/authenticate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user.email, password: 'correct-password' }),
+    }, env);
+    const accessToken = (await authenticate.json() as { accessToken: string }).accessToken;
+    db.failTokenIssuance = true;
+
+    const refresh = await app.request('/authserver/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken }),
+    }, env);
+
+    expect(refresh.status).toBe(403);
+    await expect(refresh.json()).resolves.toEqual({
+      error: 'ForbiddenOperationException',
+      errorMessage: 'Invalid token.',
+    });
   });
 
   it('returns standard errors for invalid credentials and malformed requests', async () => {
