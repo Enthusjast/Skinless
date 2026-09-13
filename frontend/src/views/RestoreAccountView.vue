@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KeyRound, ShieldCheck } from 'lucide-vue-next';
+import { KeyRound } from 'lucide-vue-next';
 import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ApiError, formatApiError, restoreAccount } from '../api';
@@ -47,10 +47,6 @@ async function submit() {
       <p class="eyebrow">ACCOUNT RECOVERY</p>
       <h1>恢复待删除账号</h1>
       <p>在 7 天恢复期内输入邮箱收到的验证码，账号会恢复为可登录状态。</p>
-      <div class="auth-perks">
-        <span><ShieldCheck :size="18" aria-hidden="true" />恢复后需要重新登录</span>
-        <span><KeyRound :size="18" aria-hidden="true" />验证码不会恢复旧会话</span>
-      </div>
     </div>
     <section class="auth-card">
       <p class="eyebrow">RESTORE ACCOUNT</p>

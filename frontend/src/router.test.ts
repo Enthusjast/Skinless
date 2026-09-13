@@ -22,4 +22,10 @@ describe('workspace routes', () => {
     expect(canonical).toMatchObject({ meta: { noindex: true, publicProfile: true } });
     expect(alias).toMatchObject({ meta: { noindex: true, publicProfile: true } });
   });
+
+  it('provides a public fallback route for unknown paths', () => {
+    const fallback = router.getRoutes().find((route) => route.path === '/:pathMatch(.*)*');
+
+    expect(fallback).toMatchObject({ path: '/:pathMatch(.*)*', meta: { title: '页面不存在' } });
+  });
 });

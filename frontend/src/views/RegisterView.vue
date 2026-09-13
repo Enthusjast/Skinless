@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
-import { ArrowLeft, Check, Eye, EyeOff, MailCheck, RefreshCw, UserPlus } from 'lucide-vue-next';
+import { ArrowLeft, Eye, EyeOff, MailCheck, RefreshCw, UserPlus } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { ApiError, formatApiError } from '../api';
 import { useAuthStore } from '../stores/auth';
@@ -174,13 +174,7 @@ onUnmounted(() => {
     <div class="auth-intro">
       <p class="eyebrow">START HERE</p>
       <h1>创建 Minecraft 账号</h1>
-      <p>验证邮箱后即可设置游戏名、上传皮肤和披风。</p>
-      <div class="auth-checklist">
-        <span><Check :size="17" aria-hidden="true" />一个账号，最多五个 Minecraft profile</span
-        ><span><Check :size="17" aria-hidden="true" />浏览器处理图片，上传更轻量</span
-        ><span><Check :size="17" aria-hidden="true" />随时切换 Classic / Slim 模型</span>
-      </div>
-      <div class="auth-visual" aria-hidden="true"><span v-for="index in 24" :key="index" /></div>
+      <p>验证邮箱后即可管理 Minecraft profile、皮肤和披风。</p>
     </div>
     <section class="auth-card">
       <p class="eyebrow">{{ step === 'details' ? 'CREATE ACCOUNT' : 'VERIFY EMAIL' }}</p>

@@ -5,6 +5,11 @@ import WorkspaceLayout from './layouts/WorkspaceLayout.vue';
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to, _from, savedPosition) {
+    if (savedPosition) return savedPosition;
+    if (to.hash) return { el: to.hash, behavior: 'smooth' };
+    return { top: 0 };
+  },
   routes: [
     {
       path: '/',
@@ -25,6 +30,11 @@ const router = createRouter({
           path: 'profiles/:uuid',
           component: () => import('./views/PublicProfileView.vue'),
           meta: { noindex: true, publicProfile: true, title: '公开 Profile' },
+        },
+        {
+          path: ':pathMatch(.*)*',
+          component: () => import('./views/NotFoundView.vue'),
+          meta: { title: '页面不存在' },
         },
       ],
     },

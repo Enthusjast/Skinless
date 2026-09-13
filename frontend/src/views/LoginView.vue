@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
-import { Eye, EyeOff, LockKeyhole, ShieldCheck, Sparkles } from 'lucide-vue-next';
+import { Eye, EyeOff, LockKeyhole } from 'lucide-vue-next';
 import { useRoute, useRouter } from 'vue-router';
 import { formatApiError } from '../api';
 import { useAuthStore } from '../stores/auth';
@@ -45,12 +45,7 @@ async function submit() {
     <div class="auth-intro">
       <p class="eyebrow">WELCOME BACK</p>
       <h1>登录 Minecraft 身份</h1>
-      <p>使用账号登录外置认证服务，管理当前角色和纹理。</p>
-      <div class="auth-perks">
-        <span><ShieldCheck :size="18" aria-hidden="true" />安全的 Cookie 会话</span
-        ><span><Sparkles :size="18" aria-hidden="true" />全球边缘低延迟</span>
-      </div>
-      <div class="auth-visual" aria-hidden="true"><span v-for="index in 24" :key="index" /></div>
+      <p>登录后管理 Minecraft profile、皮肤和披风。</p>
     </div>
     <section class="auth-card">
       <p class="eyebrow">SIGN IN</p>
