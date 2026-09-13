@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('SetupView', () => {
-  it('shows loading and diagnostic states, then reports successful copies', async () => {
+  it('shows loading and diagnostic states', async () => {
     let resolveDiagnostics!: (value: typeof diagnostics) => void;
     getDiagnostics.mockImplementationOnce(
       () =>
@@ -63,10 +63,36 @@ describe('SetupView', () => {
     expect(wrapper.get('[data-state="ready"]')).toBeTruthy();
     expect(wrapper.text()).toContain('元信息端点');
     expect(wrapper.text()).toContain('PlayerOne');
+  });
 
-    await wrapper.get('[data-copy="auth-server"]').trigger('click');
-    expect(writeText).toHaveBeenCalledWith(diagnostics.authServerUrl);
-    expect(wrapper.get('[data-copy-feedback="auth-server"]').text()).toContain('已复制');
+  it('reports successful feedback for every copy action', async () => {
+    const wrapper = mount(SetupView);
+    await flushPromises();
+
+    const copyCases = [
+      ['auth-server', diagnostics.authServerUrl],
+      ['java-agent', diagnostics.javaAgentArgument],
+      [
+        'launcher-steps',
+        '启动器：选择“外置登录（Authlib Injector）”，认证服务器填写上面的地址，再使用 Skinless 注册邮箱和密码登录。',
+      ],
+      [
+        'server-steps',
+        `服务端：将 -javaagent:authlib-injector.jar=${diagnostics.authServerUrl} 加入 Java 启动参数，并在 server.properties 中设置 online-mode=false。`,
+      ],
+      ['profile-id', diagnostics.profile.id],
+      ['profile-name', diagnostics.profile.name],
+      ['profile-texture', diagnostics.profile.textureUrl],
+    ] as const;
+
+    for (const [key, value] of copyCases) {
+      await wrapper.get(`[data-copy="${key}"]`).trigger('click');
+      await flushPromises();
+      expect(writeText).toHaveBeenLastCalledWith(value);
+      expect(wrapper.get(`[data-copy-feedback="${key}"]`).text()).toContain('已复制');
+    }
+
+    expect(writeText).toHaveBeenCalledTimes(copyCases.length);
   });
 
   it('shows a copy failure and retries a failed diagnostics request', async () => {

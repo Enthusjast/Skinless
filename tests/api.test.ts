@@ -494,11 +494,14 @@ describe('management API', () => {
   });
 
   it('returns safe launcher setup diagnostics only for authenticated users', async () => {
-    const { env, token } = await registeredClient();
-    env.API_BASE_URL = 'https://diagnostic-user:diagnostic-password@skin.example.com';
+    const { db, env, token } = await registeredClient();
+    env.API_BASE_URL = 'https://diagnostic-user:diagnostic-password@skin.example.com/launcher/?query=unsafe#fragment';
     env.YGGDRASIL_PRIVATE_KEY_PEM = 'private-key-must-not-leak';
     env.YGGDRASIL_PUBLIC_KEY_PEM = 'public-key-is-only-a-configuration-fact';
     env.IMPLEMENTATION_VERSION = '2.1.0';
+    const profile = db.profiles.get('profile-1');
+    if (!profile) throw new Error('Test profile is missing.');
+    profile.skin_hash = 'skin-hash';
 
     const unauthenticated = await app.request('/api/user/diagnostics', {}, env);
     expect(unauthenticated.status).toBe(401);
@@ -513,27 +516,102 @@ describe('management API', () => {
     const body = await response.json() as Record<string, unknown> & {
       profile: Record<string, unknown>;
     };
+    expect({
+      authServerUrl: body.authServerUrl,
+      javaAgentArgument: body.javaAgentArgument,
+      metadataUrl: body.metadataUrl,
+      profile: body.profile,
+    }).toEqual({
+      authServerUrl: 'https://skin.example.com/launcher/api/yggdrasil',
+      javaAgentArgument: '-javaagent:authlib-injector.jar=https://skin.example.com/launcher/api/yggdrasil',
+      metadataUrl: 'https://skin.example.com/launcher/api/yggdrasil',
+      profile: {
+        id: 'profile-1',
+        name: 'PlayerOne',
+        textureUrl: 'https://skin.example.com/launcher/textures/skin-hash',
+      },
+    });
     expect(body).toMatchObject({
       version: '2.1.0',
-      authServerUrl: 'https://skin.example.com/api/yggdrasil',
-      javaAgentArgument: '-javaagent:authlib-injector.jar=https://skin.example.com/api/yggdrasil',
-      metadataUrl: 'https://skin.example.com/api/yggdrasil',
       metadataReachable: true,
       publicKeyConfigured: true,
       textureDomainConfigured: true,
       profileAvailable: true,
       textureAvailable: false,
       ipBindingEnabled: false,
-      profile: {
-        id: 'profile-1',
-        name: 'PlayerOne',
-        textureUrl: null,
-      },
     });
     expect(typeof body.sameOrigin).toBe('boolean');
     expect(JSON.stringify(body)).not.toContain('private-key-must-not-leak');
     expect(JSON.stringify(body)).not.toContain('public-key-is-only-a-configuration-fact');
     expect(JSON.stringify(body)).not.toContain('diagnostic-password');
+    expect(JSON.stringify(body)).not.toContain('unsafe');
     expect(JSON.stringify(body)).not.toMatch(/password|token|secret|header|ipAddress/i);
+  });
+
+  it('uses a safe request-origin fallback and marks an invalid API base as unavailable', async () => {
+    const { env, token } = await registeredClient();
+    env.API_BASE_URL = 'not-a-valid-url';
+    env.YGGDRASIL_PRIVATE_KEY_PEM = 'private-key';
+    env.YGGDRASIL_PUBLIC_KEY_PEM = 'public-key';
+
+    const response = await app.request(
+      '/api/user/diagnostics',
+      { headers: { Authorization: `Bearer ${token}` } },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown> & {
+      profile: Record<string, unknown>;
+    };
+    expect({
+      authServerUrl: body.authServerUrl,
+      javaAgentArgument: body.javaAgentArgument,
+      metadataUrl: body.metadataUrl,
+      metadataReachable: body.metadataReachable,
+      sameOrigin: body.sameOrigin,
+      profile: body.profile,
+    }).toEqual({
+      authServerUrl: 'http://localhost/api/yggdrasil',
+      javaAgentArgument: '-javaagent:authlib-injector.jar=http://localhost/api/yggdrasil',
+      metadataUrl: 'http://localhost/api/yggdrasil',
+      metadataReachable: false,
+      sameOrigin: false,
+      profile: { id: 'profile-1', name: 'PlayerOne', textureUrl: null },
+    });
+    expect(JSON.stringify(body)).not.toContain('not-a-valid-url');
+  });
+
+  it('marks missing signing keys and invalid texture domains as unavailable', async () => {
+    const { env, token } = await registeredClient();
+    env.ENVIRONMENT = 'production';
+    env.YGGDRASIL_PRIVATE_KEY_PEM = undefined;
+    env.YGGDRASIL_PUBLIC_KEY_PEM = undefined;
+
+    const missingKeys = await app.request(
+      '/api/user/diagnostics',
+      { headers: { Authorization: `Bearer ${token}` } },
+      env,
+    );
+    await expect(missingKeys.json()).resolves.toMatchObject({
+      metadataReachable: false,
+      publicKeyConfigured: false,
+      textureDomainConfigured: true,
+    });
+
+    env.YGGDRASIL_PRIVATE_KEY_PEM = 'private-key';
+    env.YGGDRASIL_PUBLIC_KEY_PEM = 'public-key';
+    env.SKIN_DOMAIN = 'https://skin.example.com/textures?unsafe=yes#fragment';
+
+    const invalidDomain = await app.request(
+      '/api/user/diagnostics',
+      { headers: { Authorization: `Bearer ${token}` } },
+      env,
+    );
+    await expect(invalidDomain.json()).resolves.toMatchObject({
+      metadataReachable: false,
+      publicKeyConfigured: true,
+      textureDomainConfigured: false,
+    });
   });
 });

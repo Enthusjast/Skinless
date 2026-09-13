@@ -86,8 +86,9 @@ import {
   getPublicBaseUrl,
   getTextureUrl,
   getYggdrasilPublicKeyPem,
+  isMetadataConfigurationValid,
   isSameOrigin,
-  metadata,
+  isSkinDomainConfigured,
 } from '../utils/config';
 import {
   isTextureModelCompatible,
@@ -910,11 +911,9 @@ routes.get('/user/diagnostics', authMiddleware, async (c) => {
     authServerUrl,
     javaAgentArgument: `-javaagent:authlib-injector.jar=${authServerUrl}`,
     metadataUrl: authServerUrl,
-    metadataReachable: metadata(c).ok,
+    metadataReachable: isMetadataConfigurationValid(c),
     publicKeyConfigured: Boolean(getYggdrasilPublicKeyPem(c.env)),
-    textureDomainConfigured: Boolean(
-      c.env.SKIN_DOMAIN?.split(',').some((domain) => domain.trim().length > 0),
-    ),
+    textureDomainConfigured: isSkinDomainConfigured(c),
     profileAvailable: true,
     textureAvailable,
     sameOrigin: isSameOrigin(c),

@@ -5,29 +5,73 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
-function cleanDomain(value: string): string {
-  return value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+function parseHttpUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin === 'null' || !url.hostname) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizePublicBaseUrl(value: string): string | null {
+  const url = parseHttpUrl(value);
+  if (!url) return null;
+
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return trimTrailingSlash(url.toString());
+}
+
+function cleanDomain(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const url = parseHttpUrl(candidate);
+  if (!url || url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
+    return null;
+  }
+  return url.host;
+}
+
+function configuredSkinDomains(value: string | undefined): string[] {
+  return value?.split(',').map((domain) => domain.trim()).filter(Boolean) ?? [];
 }
 
 export function getPublicBaseUrl(c: Context<AppEnv>): string {
   const configured = c.env.API_BASE_URL?.trim();
   if (configured) {
-    try {
-      const url = new URL(configured);
-      url.username = '';
-      url.password = '';
-      return trimTrailingSlash(url.toString());
-    } catch {
-      return trimTrailingSlash(configured);
-    }
+    return sanitizePublicBaseUrl(configured) ?? new URL(c.req.url).origin;
   }
   return new URL(c.req.url).origin;
 }
 
 export function getSkinDomains(c: Context<AppEnv>): string[] {
-  const configured = c.env.SKIN_DOMAIN?.split(',').map(cleanDomain).filter(Boolean) ?? [];
+  const configured = configuredSkinDomains(c.env.SKIN_DOMAIN)
+    .map(cleanDomain)
+    .filter((domain): domain is string => Boolean(domain));
   if (configured.length > 0) return configured;
   return [new URL(c.req.url).host];
+}
+
+export function hasValidApiBaseUrl(c: Context<AppEnv>): boolean {
+  const configured = c.env.API_BASE_URL?.trim();
+  return !configured || sanitizePublicBaseUrl(configured) !== null;
+}
+
+export function hasValidSkinDomainConfiguration(c: Context<AppEnv>): boolean {
+  return configuredSkinDomains(c.env.SKIN_DOMAIN).every((domain) => cleanDomain(domain) !== null);
+}
+
+export function isSkinDomainConfigured(c: Context<AppEnv>): boolean {
+  const configured = configuredSkinDomains(c.env.SKIN_DOMAIN);
+  return configured.length > 0 && hasValidSkinDomainConfiguration(c);
 }
 
 export function getTextureUrl(c: Context<AppEnv>, hash: string): string {
@@ -38,13 +82,12 @@ export function isSameOrigin(c: Context<AppEnv>): boolean {
   const configured = c.env.API_BASE_URL?.trim();
   if (!configured) return true;
 
-  try {
-    const configuredOrigin = new URL(configured).origin;
-    const requestOrigin = c.req.header('Origin')?.trim() || new URL(c.req.url).origin;
-    return new URL(requestOrigin).origin === configuredOrigin;
-  } catch {
-    return false;
-  }
+  const configuredUrl = sanitizePublicBaseUrl(configured);
+  if (!configuredUrl) return false;
+
+  const requestOrigin = c.req.header('Origin')?.trim() || new URL(c.req.url).origin;
+  const requestUrl = parseHttpUrl(requestOrigin);
+  return requestUrl?.origin === new URL(configuredUrl).origin;
 }
 
 export function getYggdrasilPrivateKeyPem(bindings: Bindings): string | null {
@@ -61,6 +104,13 @@ export function allowUnsignedTextures(bindings: Bindings): boolean {
   const environment = bindings.ENVIRONMENT?.trim().toLowerCase();
   const explicitlyEnabled = bindings.YGGDRASIL_ALLOW_UNSIGNED_TEXTURES?.trim().toLowerCase() === 'true';
   return explicitlyEnabled && (environment === 'development' || environment === 'local' || environment === 'test');
+}
+
+export function isMetadataConfigurationValid(c: Context<AppEnv>): boolean {
+  const signingConfigured = allowUnsignedTextures(c.env) || Boolean(
+    getYggdrasilPrivateKeyPem(c.env) && getYggdrasilPublicKeyPem(c.env),
+  );
+  return hasValidApiBaseUrl(c) && hasValidSkinDomainConfiguration(c) && getSkinDomains(c).length > 0 && signingConfigured;
 }
 
 export function getTokenExpiryMs(c: Context<AppEnv>): number {
