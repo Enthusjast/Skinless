@@ -21,11 +21,21 @@ export function serializeUser(user: UserRecord, profile?: ProfileRecord) {
   };
 }
 
+export function serializeAdminUser(user: UserRecord, profile?: ProfileRecord) {
+  return {
+    ...serializeUser(user, profile),
+    status: user.status ?? 'active',
+    deletionRequestedAt: user.deletion_requested_at ?? null,
+  };
+}
+
 export function serializeUserWithProfile(user: UserWithProfile) {
   return {
     id: user.id,
     email: user.email,
     role: user.role,
+    status: user.status ?? 'active',
+    deletionRequestedAt: user.deletion_requested_at ?? null,
     createdAt: user.created_at,
     updatedAt: user.updated_at,
     profile: {

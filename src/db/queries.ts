@@ -109,6 +109,21 @@ export async function findProfileByUserId(
     .first<ProfileRecord>();
 }
 
+export async function findAnyProfileByUserId(
+  db: D1Database,
+  userId: string,
+): Promise<ProfileRecord | null> {
+  return db
+    .prepare(
+      `SELECT * FROM profiles
+       WHERE user_id = ?
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1`,
+    )
+    .bind(userId)
+    .first<ProfileRecord>();
+}
+
 export async function findDefaultProfileByUserId(
   db: D1Database,
   userId: string,
@@ -518,6 +533,22 @@ export async function revokeUserWebSessions(
     )
     .bind(revokedAt, userId)
     .run();
+}
+
+export async function revokeUserAuthSessions(
+  db: D1Database,
+  userId: string,
+  revokedAt: number,
+): Promise<void> {
+  await db.batch([
+    db.prepare('DELETE FROM tokens WHERE user_id = ?').bind(userId),
+    db
+      .prepare(
+        'UPDATE web_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL',
+      )
+      .bind(revokedAt, userId),
+    db.prepare('DELETE FROM server_sessions WHERE user_id = ?').bind(userId),
+  ]);
 }
 
 export async function listWebSessions(
@@ -1701,11 +1732,118 @@ export async function updateUserRole(
   userId: string,
   role: UserRole,
   updatedAt: number,
-): Promise<void> {
-  await db
-    .prepare("UPDATE users SET role = ?, updated_at = ? WHERE id = ?")
-    .bind(role, updatedAt, userId)
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE users
+       SET role = ?, updated_at = ?
+       WHERE id = ?
+         AND (
+           ? = 'admin'
+           OR role <> 'admin'
+           OR status <> 'active'
+           OR EXISTS (
+             SELECT 1 FROM users other
+             WHERE other.role = 'admin'
+               AND other.status = 'active'
+               AND other.id <> users.id
+           )
+         )`,
+    )
+    .bind(role, updatedAt, userId, role)
     .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function updateUserStatus(
+  db: D1Database,
+  userId: string,
+  status: 'active' | 'disabled',
+  updatedAt: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE users
+       SET status = ?, deletion_requested_at = NULL, updated_at = ?
+       WHERE id = ?
+         AND status IN ('active', 'disabled')
+         AND (
+           ? <> 'disabled'
+           OR role <> 'admin'
+           OR status <> 'active'
+           OR EXISTS (
+             SELECT 1 FROM users other
+             WHERE other.role = 'admin'
+               AND other.status = 'active'
+               AND other.id <> users.id
+           )
+         )`,
+    )
+    .bind(status, updatedAt, userId, status)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function countActiveAdministrators(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND status = 'active'")
+    .first<{ count: number }>();
+  return Number(row?.count ?? 0);
+}
+
+export async function deleteAdminUser(
+  db: D1Database,
+  userId: string,
+  textureCleanupScheduledAt: number,
+): Promise<boolean> {
+  const results = await db.batch([
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO texture_cleanup
+         (hash, object_key, scheduled_at, attempts, last_error)
+         SELECT DISTINCT assets.asset_hash, assets.asset_hash || '.png', ?, 0, NULL
+         FROM (
+           SELECT skin_hash AS asset_hash FROM profiles WHERE user_id = ? AND skin_hash IS NOT NULL
+           UNION
+           SELECT cape_hash AS asset_hash FROM profiles WHERE user_id = ? AND cape_hash IS NOT NULL
+           UNION
+           SELECT hash AS asset_hash FROM texture_wardrobe WHERE user_id = ?
+         ) AS assets
+         WHERE EXISTS (
+           SELECT 1 FROM users target
+           WHERE target.id = ?
+             AND (
+               target.role <> 'admin'
+               OR target.status <> 'active'
+               OR EXISTS (
+                 SELECT 1 FROM users other
+                 WHERE other.role = 'admin'
+                   AND other.status = 'active'
+                   AND other.id <> target.id
+               )
+             )
+         )`,
+      )
+      .bind(textureCleanupScheduledAt, userId, userId, userId, userId),
+    db
+      .prepare(
+        `DELETE FROM users
+         WHERE id = ?
+           AND (
+             role <> 'admin'
+             OR status <> 'active'
+             OR EXISTS (
+               SELECT 1 FROM users other
+               WHERE other.role = 'admin'
+                 AND other.status = 'active'
+                 AND other.id <> users.id
+             )
+           )`,
+      )
+      .bind(userId),
+  ]);
+  const userDelete = results[1] as { meta?: { changes?: number } } | undefined;
+  return (userDelete?.meta?.changes ?? 0) > 0;
 }
 
 export interface TextureCleanupRow {
@@ -1834,6 +1972,7 @@ export async function listUsers(
     .prepare(
       `SELECT
         u.id, u.email, u.password, u.salt, u.role, u.created_at, u.updated_at,
+        u.status, u.deletion_requested_at,
         p.id AS profile_id, p.name AS profile_name, p.skin_hash, p.cape_hash, p.skin_model
        FROM users u
        INNER JOIN profiles p ON p.id = COALESCE(

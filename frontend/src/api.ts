@@ -107,7 +107,12 @@ export interface WebSession {
   current: boolean;
 }
 
-export type AdminUser = ApiUser;
+export type AdminUserStatus = 'active' | 'disabled' | 'pending_deletion';
+
+export interface AdminUser extends ApiUser {
+  status: AdminUserStatus;
+  deletionRequestedAt: number | null;
+}
 
 export type RegistrationMode = 'open' | 'invite' | 'closed';
 
@@ -621,10 +626,43 @@ export function getAdminUsers(): Promise<{ users: AdminUser[] }> {
   return managementRequest<{ users: AdminUser[] }>('/api/admin/users');
 }
 
-export function updateUserRole(userId: string, role: 'user' | 'admin'): Promise<void> {
+export function updateUserRole(
+  userId: string,
+  role: 'user' | 'admin',
+  confirmation?: string,
+): Promise<void> {
+  const body: { role: 'user' | 'admin'; confirmation?: string } = { role };
+  if (confirmation) body.confirmation = confirmation;
   return managementRequest<void>(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
     method: 'PUT',
-    body: JSON.stringify({ role }),
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateAdminUserStatus(
+  userId: string,
+  status: AdminUserStatus,
+  confirmation?: string,
+): Promise<{ user: AdminUser }> {
+  const body: { status: AdminUserStatus; confirmation?: string } = { status };
+  if (confirmation) body.confirmation = confirmation;
+  return managementRequest<{ user: AdminUser }>(
+    `/api/admin/users/${encodeURIComponent(userId)}/status`,
+    { method: 'PATCH', body: JSON.stringify(body) },
+  );
+}
+
+export function revokeAdminUserSessions(userId: string, confirmation = 'REVOKE'): Promise<void> {
+  return managementRequest<void>(`/api/admin/users/${encodeURIComponent(userId)}/sessions`, {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmation }),
+  });
+}
+
+export function deleteAdminUser(userId: string, confirmation = 'DELETE'): Promise<void> {
+  return managementRequest<void>(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmation }),
   });
 }
 

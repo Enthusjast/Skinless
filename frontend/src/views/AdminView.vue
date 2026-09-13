@@ -1,18 +1,33 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Ban, RefreshCw, Save, Search, ShieldCheck, Ticket, Users } from 'lucide-vue-next';
+import {
+  Ban,
+  MoreHorizontal,
+  RefreshCw,
+  Save,
+  Search,
+  ShieldCheck,
+  Ticket,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-vue-next';
 import {
   createAdminInvite,
+  deleteAdminUser,
   formatApiError,
   getAdminInvites,
   getAdminSettings,
   getAdminUsers,
+  revokeAdminUserSessions,
   revokeAdminInvite,
   updateAdminSettings,
+  updateAdminUserStatus,
   updateUserRole,
   type AdminInvite,
   type AdminRegistrationSettings,
   type AdminUser,
+  type AdminUserStatus,
   type RegistrationMode,
 } from '../api';
 import UiCard from '../components/common/UiCard.vue';
@@ -48,6 +63,15 @@ const inviteExpiresAt = ref('');
 const inviteNote = ref('');
 const createdInviteCode = ref('');
 const revokingInvite = ref<string | null>(null);
+const openMenuUserId = ref<string | null>(null);
+const actionUser = ref<AdminUser | null>(null);
+const userAction = ref<UserAction | null>(null);
+const actionConfirmation = ref('');
+const actionModalError = ref('');
+const actionRunning = ref(false);
+const userActionSuccess = ref('');
+
+type UserAction = 'disable' | 'enable' | 'revoke_sessions' | 'delete' | 'demote';
 
 const filteredUsers = computed(() =>
   users.value.filter((user) => {
@@ -57,7 +81,112 @@ const filteredUsers = computed(() =>
   }),
 );
 
-const adminCount = computed(() => users.value.filter((user) => user.role === 'admin').length);
+const adminCount = computed(
+  () => users.value.filter((user) => user.role === 'admin' && user.status === 'active').length,
+);
+
+function statusLabel(status: AdminUserStatus): string {
+  if (status === 'disabled') return '已禁用';
+  if (status === 'pending_deletion') return '待删除';
+  return '正常';
+}
+
+function statusClass(status: AdminUserStatus): string {
+  if (status === 'disabled') return 'admin-status-disabled';
+  if (status === 'pending_deletion') return 'admin-status-pending';
+  return 'admin-status-active';
+}
+
+const requiredConfirmation = computed(() => {
+  if (userAction.value === 'disable') return 'DISABLE';
+  if (userAction.value === 'demote') return 'DEMOTE';
+  if (userAction.value === 'revoke_sessions') return 'REVOKE';
+  if (userAction.value === 'delete') return 'DELETE';
+  return '';
+});
+
+const actionTitle = computed(() => {
+  if (userAction.value === 'disable') return '禁用账号';
+  if (userAction.value === 'enable') return '启用账号';
+  if (userAction.value === 'demote') return '移除管理员角色';
+  if (userAction.value === 'revoke_sessions') return '撤销全部会话';
+  if (userAction.value === 'delete') return '永久删除账号';
+  return '确认操作';
+});
+
+const actionDescription = computed(() => {
+  const name = actionUser.value?.profile.name ?? '此账号';
+  if (userAction.value === 'disable') return `禁用 ${name} 后，该账号将无法登录或创建新会话。`;
+  if (userAction.value === 'enable') return `重新启用 ${name} 后，该账号可以再次登录。`;
+  if (userAction.value === 'demote') return `移除 ${name} 的管理员角色后，该账号将失去管理权限。`;
+  if (userAction.value === 'revoke_sessions')
+    return `撤销 ${name} 的全部会话、协议令牌和服务器加入状态。`;
+  if (userAction.value === 'delete')
+    return `永久删除 ${name} 的账号、Profile 和私人纹理记录。此操作无法撤销。`;
+  return '';
+});
+
+function toggleUserMenu(userId: string): void {
+  openMenuUserId.value = openMenuUserId.value === userId ? null : userId;
+}
+
+function startUserAction(user: AdminUser, action: UserAction): void {
+  openMenuUserId.value = null;
+  actionUser.value = user;
+  userAction.value = action;
+  actionConfirmation.value = '';
+  actionModalError.value = '';
+  userActionSuccess.value = '';
+}
+
+function closeUserAction(): void {
+  if (actionRunning.value) return;
+  actionUser.value = null;
+  userAction.value = null;
+  actionConfirmation.value = '';
+  actionModalError.value = '';
+}
+
+async function confirmUserAction(): Promise<void> {
+  const user = actionUser.value;
+  const action = userAction.value;
+  if (!user || !action || actionRunning.value) return;
+  const expected = requiredConfirmation.value;
+  if (expected && actionConfirmation.value.trim() !== expected) {
+    actionModalError.value = `请输入 ${expected} 以确认此操作。`;
+    return;
+  }
+
+  actionRunning.value = true;
+  actionModalError.value = '';
+  try {
+    let message = '';
+    if (action === 'disable') {
+      await updateAdminUserStatus(user.id, 'disabled', expected);
+      message = `${user.profile.name} 已禁用。`;
+    } else if (action === 'enable') {
+      await updateAdminUserStatus(user.id, 'active');
+      message = `${user.profile.name} 已启用。`;
+    } else if (action === 'demote') {
+      await updateUserRole(user.id, 'user', expected);
+      message = `${user.profile.name} 已移除管理员角色。`;
+    } else if (action === 'revoke_sessions') {
+      await revokeAdminUserSessions(user.id, expected);
+      message = `${user.profile.name} 的全部会话已撤销。`;
+    } else {
+      await deleteAdminUser(user.id, expected);
+      message = `${user.profile.name} 已永久删除。`;
+    }
+    await loadUsers();
+    userActionSuccess.value = message;
+    actionRunning.value = false;
+    closeUserAction();
+  } catch (cause) {
+    actionModalError.value = formatApiError(cause, '账号操作失败。');
+  } finally {
+    actionRunning.value = false;
+  }
+}
 
 async function loadUsers() {
   if (!auth.isAuthenticated) return;
@@ -75,6 +204,10 @@ async function loadUsers() {
 async function changeRole(user: AdminUser, event: Event) {
   if (!auth.isAuthenticated) return;
   const role = (event.target as HTMLSelectElement).value as 'user' | 'admin';
+  if (role === 'user' && user.role === 'admin') {
+    startUserAction(user, 'demote');
+    return;
+  }
   updating.value = user.id;
   actionMessage.value = '';
   actionError.value = '';
@@ -450,6 +583,15 @@ onMounted(() => {
         {{ actionMessage }}
       </p>
       <p v-if="actionError" class="admin-feedback form-error" role="alert">{{ actionError }}</p>
+      <p
+        v-if="userActionSuccess"
+        data-state="user-action-success"
+        class="admin-feedback form-success"
+        role="status"
+        aria-live="polite"
+      >
+        {{ userActionSuccess }}
+      </p>
       <div class="admin-table-desktop">
         <table>
           <thead>
@@ -458,6 +600,8 @@ onMounted(() => {
               <th>邮箱</th>
               <th>注册时间</th>
               <th>角色</th>
+              <th>状态</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -478,6 +622,66 @@ onMounted(() => {
                   <option value="user">user</option>
                   <option value="admin">admin</option>
                 </select>
+              </td>
+              <td>
+                <span
+                  class="admin-status-badge"
+                  :class="statusClass(user.status)"
+                  :data-status="user.status"
+                >
+                  <span class="admin-status-dot" aria-hidden="true" />{{ statusLabel(user.status) }}
+                </span>
+              </td>
+              <td>
+                <div class="admin-action-menu-wrap">
+                  <button
+                    class="icon-button"
+                    type="button"
+                    data-action="open-user-actions"
+                    :aria-label="`打开 ${user.profile.name} 的账号操作`"
+                    :aria-expanded="openMenuUserId === user.id"
+                    @click.stop="toggleUserMenu(user.id)"
+                  >
+                    <MoreHorizontal :size="18" aria-hidden="true" />
+                  </button>
+                  <div v-if="openMenuUserId === user.id" class="admin-action-menu" role="menu">
+                    <button
+                      v-if="user.status === 'active'"
+                      type="button"
+                      role="menuitem"
+                      data-action="disable-user"
+                      @click="startUserAction(user, 'disable')"
+                    >
+                      禁用账号
+                    </button>
+                    <button
+                      v-else-if="user.status === 'disabled'"
+                      type="button"
+                      role="menuitem"
+                      data-action="enable-user"
+                      @click="startUserAction(user, 'enable')"
+                    >
+                      启用账号
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-action="revoke-user-sessions"
+                      @click="startUserAction(user, 'revoke_sessions')"
+                    >
+                      撤销全部会话
+                    </button>
+                    <button
+                      class="is-danger"
+                      type="button"
+                      role="menuitem"
+                      data-action="delete-user"
+                      @click="startUserAction(user, 'delete')"
+                    >
+                      <Trash2 :size="15" aria-hidden="true" />永久删除
+                    </button>
+                  </div>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -500,6 +704,62 @@ onMounted(() => {
               <option value="user">user</option>
               <option value="admin">admin</option>
             </select>
+            <span
+              class="admin-status-badge"
+              :class="statusClass(user.status)"
+              :data-status="user.status"
+            >
+              <span class="admin-status-dot" aria-hidden="true" />{{ statusLabel(user.status) }}
+            </span>
+            <div class="admin-action-menu-wrap">
+              <button
+                class="icon-button"
+                type="button"
+                data-action="open-user-actions"
+                :aria-label="`打开 ${user.profile.name} 的账号操作`"
+                :aria-expanded="openMenuUserId === user.id"
+                @click.stop="toggleUserMenu(user.id)"
+              >
+                <MoreHorizontal :size="18" aria-hidden="true" />
+              </button>
+              <div v-if="openMenuUserId === user.id" class="admin-action-menu" role="menu">
+                <button
+                  v-if="user.status === 'active'"
+                  type="button"
+                  role="menuitem"
+                  data-action="disable-user"
+                  @click="startUserAction(user, 'disable')"
+                >
+                  禁用账号
+                </button>
+                <button
+                  v-else-if="user.status === 'disabled'"
+                  type="button"
+                  role="menuitem"
+                  data-action="enable-user"
+                  @click="startUserAction(user, 'enable')"
+                >
+                  启用账号
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-action="revoke-user-sessions"
+                  @click="startUserAction(user, 'revoke_sessions')"
+                >
+                  撤销全部会话
+                </button>
+                <button
+                  class="is-danger"
+                  type="button"
+                  role="menuitem"
+                  data-action="delete-user"
+                  @click="startUserAction(user, 'delete')"
+                >
+                  <Trash2 :size="15" aria-hidden="true" />永久删除
+                </button>
+              </div>
+            </div>
           </div>
         </article>
       </div>
@@ -508,4 +768,67 @@ onMounted(() => {
       </p>
     </div>
   </UiCard>
+
+  <div v-if="actionUser && userAction" class="admin-modal-backdrop" @click.self="closeUserAction">
+    <section
+      class="admin-confirmation-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="admin-confirmation-title"
+    >
+      <div class="admin-confirmation-heading">
+        <div>
+          <p class="eyebrow">ACCOUNT CONTROL</p>
+          <h2 id="admin-confirmation-title">{{ actionTitle }}</h2>
+        </div>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label="关闭确认窗口"
+          :disabled="actionRunning"
+          @click="closeUserAction"
+        >
+          <X :size="18" aria-hidden="true" />
+        </button>
+      </div>
+      <p class="admin-confirmation-description">{{ actionDescription }}</p>
+      <label v-if="requiredConfirmation" class="field admin-confirmation-field">
+        <span
+          >请输入 <code>{{ requiredConfirmation }}</code> 继续</span
+        >
+        <input
+          v-model="actionConfirmation"
+          name="admin-confirmation"
+          type="text"
+          autocomplete="off"
+          :placeholder="requiredConfirmation"
+          @keyup.enter="confirmUserAction"
+        />
+      </label>
+      <p v-if="actionModalError" class="form-error" role="alert">{{ actionModalError }}</p>
+      <div class="admin-confirmation-actions">
+        <button
+          class="button button-ghost"
+          type="button"
+          :disabled="actionRunning"
+          @click="closeUserAction"
+        >
+          取消
+        </button>
+        <button
+          class="button"
+          :class="userAction === 'delete' ? 'button-danger' : 'button-primary'"
+          type="button"
+          data-action="confirm-user-action"
+          :disabled="
+            actionRunning ||
+            Boolean(requiredConfirmation && actionConfirmation.trim() !== requiredConfirmation)
+          "
+          @click="confirmUserAction"
+        >
+          {{ actionRunning ? '处理中…' : actionTitle }}
+        </button>
+      </div>
+    </section>
+  </div>
 </template>

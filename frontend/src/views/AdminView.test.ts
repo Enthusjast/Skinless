@@ -9,16 +9,22 @@ const {
   getAdminInvites,
   getAdminSettings,
   getAdminUsers,
+  deleteAdminUser,
+  revokeAdminUserSessions,
   revokeAdminInvite,
   updateAdminSettings,
+  updateAdminUserStatus,
   updateUserRole,
 } = vi.hoisted(() => ({
   createAdminInvite: vi.fn(),
+  deleteAdminUser: vi.fn(),
   getAdminInvites: vi.fn(),
   getAdminSettings: vi.fn(),
   getAdminUsers: vi.fn(),
+  revokeAdminUserSessions: vi.fn(),
   revokeAdminInvite: vi.fn(),
   updateAdminSettings: vi.fn(),
+  updateAdminUserStatus: vi.fn(),
   updateUserRole: vi.fn(),
 }));
 
@@ -26,11 +32,14 @@ vi.mock('../api', () => ({
   formatApiError: (cause: unknown, fallback: string) =>
     cause instanceof Error ? cause.message : fallback,
   createAdminInvite,
+  deleteAdminUser,
   getAdminInvites,
   getAdminSettings,
   getAdminUsers,
+  revokeAdminUserSessions,
   revokeAdminInvite,
   updateAdminSettings,
+  updateAdminUserStatus,
   updateUserRole,
 }));
 
@@ -54,6 +63,23 @@ const invite = {
   revokedAt: null,
   createdAt: 1,
   updatedAt: 1,
+};
+
+const managedUser = {
+  id: 'user-1',
+  email: 'player@example.com',
+  role: 'user' as const,
+  status: 'active' as const,
+  deletionRequestedAt: null,
+  createdAt: 2,
+  updatedAt: 2,
+  profile: {
+    id: 'profile-user-1',
+    name: 'PlayerOne',
+    skinHash: null,
+    capeHash: null,
+    skinModel: 'classic' as const,
+  },
 };
 
 beforeEach(() => {
@@ -82,6 +108,9 @@ beforeEach(() => {
   });
   createAdminInvite.mockResolvedValue({ invite: { ...invite, code: 'secret-code' } });
   revokeAdminInvite.mockResolvedValue({ invite: { ...invite, revokedAt: 2 } });
+  updateAdminUserStatus.mockResolvedValue({ user: { ...managedUser, status: 'disabled' } });
+  revokeAdminUserSessions.mockResolvedValue(undefined);
+  deleteAdminUser.mockResolvedValue(undefined);
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -147,5 +176,32 @@ describe('AdminView registration controls', () => {
     expect(
       (wrapper.get('select[name="registration-mode"]').element as HTMLSelectElement).value,
     ).toBe('open');
+  });
+});
+
+describe('AdminView account controls', () => {
+  it('requires typed confirmation, shows status, and refreshes the row after disabling', async () => {
+    getAdminUsers
+      .mockResolvedValueOnce({ users: [{ ...managedUser }] })
+      .mockResolvedValueOnce({ users: [{ ...managedUser, status: 'disabled' }] });
+
+    const wrapper = mount(AdminView);
+    await flushPromises();
+
+    expect(wrapper.get('[data-status="active"]').text()).toContain('正常');
+    await wrapper.get('[data-action="open-user-actions"]').trigger('click');
+    await wrapper.get('[data-action="disable-user"]').trigger('click');
+
+    const confirm = wrapper.get('[data-action="confirm-user-action"]');
+    expect((confirm.element as HTMLButtonElement).disabled).toBe(true);
+    await wrapper.get('input[name="admin-confirmation"]').setValue('DISABLE');
+    expect((confirm.element as HTMLButtonElement).disabled).toBe(false);
+    await confirm.trigger('click');
+    await flushPromises();
+
+    expect(updateAdminUserStatus).toHaveBeenCalledWith('user-1', 'disabled', 'DISABLE');
+    expect(getAdminUsers).toHaveBeenCalledTimes(2);
+    expect(wrapper.get('[data-status="disabled"]').text()).toContain('已禁用');
+    expect(wrapper.get('[data-state="user-action-success"]').text()).toContain('已禁用');
   });
 });

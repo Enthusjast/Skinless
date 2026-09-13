@@ -3,11 +3,14 @@ import type { Context } from 'hono';
 import {
   countTexturesByUserId,
   countTexturesByUserIdAndType,
+  countActiveAdministrators,
   countProfilesByUserId,
+  deleteAdminUser as deleteAdminUserQuery,
   deleteTextureIfUnreferenced,
   deleteProfile,
   deleteUserTokens,
   findDefaultProfileByUserId,
+  findAnyProfileByUserId,
   findTextureByIdForUser,
   findTextureByUserHashAndType,
   findUserByEmail,
@@ -32,6 +35,7 @@ import {
   revokeOtherWebSessions,
   revokeRegistrationInvite,
   revokeUserWebSessions,
+  revokeUserAuthSessions,
   rotateWebSession,
   updatePassword,
   updateProfileName,
@@ -40,6 +44,7 @@ import {
   updateSiteSettings,
   updateTextureName,
   updateUserRole,
+  updateUserStatus,
   MAX_PROFILES_PER_USER,
   setDefaultProfile,
 } from '../db/queries';
@@ -49,6 +54,7 @@ import {
   putTextureObject,
   restoreTextureObject,
   scheduleTextureCleanup,
+  TEXTURE_CLEANUP_DELAY_MS,
 } from '../texture-cleanup';
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
 import {
@@ -60,7 +66,12 @@ import {
 import { createSalt, hashPassword, sha256Hex, timingSafeEqual, verifyPassword } from '../utils/crypto';
 import { jsonError, readJson } from '../utils/errors';
 import { turnstileTokenFromBody, verifyTurnstileToken } from '../utils/turnstile';
-import { serializeProfile, serializeUser, serializeUserWithProfile } from '../utils/serializers';
+import {
+  serializeAdminUser,
+  serializeProfile,
+  serializeUser,
+  serializeUserWithProfile,
+} from '../utils/serializers';
 import { normalizePng, type AssetKind } from '../utils/png';
 import { generateProfileId, generateUserId } from '../utils/uuid';
 import { getTextureUrl } from '../utils/config';
@@ -90,6 +101,13 @@ import {
   parseRegistrationSettings,
   type RegistrationSettingsValues,
 } from '../utils/registration';
+import {
+  ADMIN_DEMOTION_CONFIRMATION,
+  ADMIN_DISABLE_CONFIRMATION,
+  ADMIN_SESSION_REVOKE_CONFIRMATION,
+  ADMIN_USER_DELETE_CONFIRMATION,
+  parseAdminUserStatus,
+} from '../utils/admin';
 
 interface PasswordInput {
   currentPassword?: unknown;
@@ -104,6 +122,16 @@ interface WebLoginInput {
 
 interface RoleInput {
   role?: unknown;
+  confirmation?: unknown;
+  confirm?: unknown;
+  confirmText?: unknown;
+}
+
+interface AdminStatusInput {
+  status?: unknown;
+  confirmation?: unknown;
+  confirm?: unknown;
+  confirmText?: unknown;
 }
 
 interface ProfileNameInput {
@@ -270,6 +298,71 @@ function serializeRegistrationInvite(
 
 function validationError(c: Context<AppEnv>, result: { code: string; message: string }): Response {
   return jsonError(c, 400, result.message, 'IllegalArgumentException', result.code);
+}
+
+function confirmationValue(body: Record<string, unknown> | null): string | boolean | null {
+  if (!body) return null;
+  const value = body.confirmation ?? body.confirmText ?? body.confirm;
+  if (typeof value === 'boolean') return value;
+  return typeof value === 'string' ? value.trim() : null;
+}
+
+function requireAdminConfirmation(
+  c: Context<AppEnv>,
+  body: Record<string, unknown> | null,
+  expected: string,
+): Response | null {
+  const value = confirmationValue(body);
+  if (value === true) return null;
+  if (value === null || value === '') {
+    return jsonError(
+      c,
+      400,
+      `confirmation must be ${expected}.`,
+      'IllegalArgumentException',
+      'confirmation_required',
+    );
+  }
+  if (value !== expected) {
+    return jsonError(
+      c,
+      400,
+      `confirmation must be ${expected}.`,
+      'IllegalArgumentException',
+      'invalid_confirmation',
+    );
+  }
+  return null;
+}
+
+function adminUserNotFound(c: Context<AppEnv>): Response {
+  return jsonError(c, 404, 'User not found.', 'NotFound', 'user_not_found');
+}
+
+function adminGuardError(c: Context<AppEnv>, targetId: string, actorId: string): Response {
+  return jsonError(
+    c,
+    409,
+    targetId === actorId
+      ? 'You must keep another active administrator before locking your account.'
+      : 'The last active administrator cannot be removed.',
+    'Conflict',
+    targetId === actorId ? 'admin_self_lockout' : 'last_active_admin',
+  );
+}
+
+async function adminMutationConflict(
+  c: Context<AppEnv>,
+  targetId: string,
+  actorId: string,
+): Promise<Response> {
+  const target = await findUserById(c.env.DB, targetId);
+  if (!target) return adminUserNotFound(c);
+  const activeAdmins = await countActiveAdministrators(c.env.DB);
+  if (target.role === 'admin' && target.status === 'active' && activeAdmins <= 1) {
+    return adminGuardError(c, targetId, actorId);
+  }
+  return jsonError(c, 409, 'The account changed before this action completed.', 'Conflict', 'account_update_conflict');
 }
 
 function serializeTexture(c: Context<AppEnv>, texture: TextureWardrobeRecord) {
@@ -894,11 +987,101 @@ routes.put('/admin/users/:id/role', authMiddleware, adminMiddleware, async (c) =
   const body = await readJson<RoleInput>(c);
   const role = body?.role;
   if (role !== 'user' && role !== 'admin') return jsonError(c, 400, 'role must be user or admin.');
-  const user = await findUserById(c.env.DB, c.req.param('id'));
-  if (!user) return jsonError(c, 404, 'User not found.', 'NotFound');
-  await updateUserRole(c.env.DB, user.id, role as UserRole, Date.now());
-  return c.json({ user: { ...serializeUser(user), role } });
+  const userId = c.req.param('id') ?? '';
+  const user = await findUserById(c.env.DB, userId);
+  if (!user) return adminUserNotFound(c);
+  if (role === 'user') {
+    const confirmationError = requireAdminConfirmation(
+      c,
+      body as Record<string, unknown> | null,
+      ADMIN_DEMOTION_CONFIRMATION,
+    );
+    if (confirmationError) return confirmationError;
+  }
+  const updated = await updateUserRole(c.env.DB, user.id, role as UserRole, Date.now());
+  if (!updated) return adminMutationConflict(c, user.id, c.get('user').id);
+  const nextUser = await findUserById(c.env.DB, user.id);
+  const nextProfile = nextUser ? await findAnyProfileByUserId(c.env.DB, user.id) : null;
+  return c.json({ user: nextUser ? serializeAdminUser(nextUser, nextProfile ?? undefined) : { ...serializeUser(user), role } });
 });
+
+async function updateAdminUserStatus(c: Context<AppEnv>): Promise<Response> {
+  const body = await readJson<AdminStatusInput>(c);
+  const parsed = parseAdminUserStatus(body?.status);
+  if (!parsed.ok) return validationError(c, parsed);
+  if (parsed.value === 'pending_deletion') {
+    return jsonError(
+      c,
+      400,
+      'pending_deletion is managed by the account deletion flow.',
+      'IllegalArgumentException',
+      'status_transition_not_allowed',
+    );
+  }
+
+  if (parsed.value === 'disabled') {
+    const confirmationError = requireAdminConfirmation(
+      c,
+      body as Record<string, unknown> | null,
+      ADMIN_DISABLE_CONFIRMATION,
+    );
+    if (confirmationError) return confirmationError;
+  }
+
+  const userId = c.req.param('id') ?? '';
+  const user = await findUserById(c.env.DB, userId);
+  if (!user) return adminUserNotFound(c);
+  const updated = await updateUserStatus(c.env.DB, userId, parsed.value, Date.now());
+  if (!updated) return adminMutationConflict(c, userId, c.get('user').id);
+  if (parsed.value === 'disabled') {
+    await revokeUserAuthSessions(c.env.DB, userId, Date.now());
+  }
+  const nextUser = await findUserById(c.env.DB, userId);
+  if (!nextUser) return adminUserNotFound(c);
+  const nextProfile = await findAnyProfileByUserId(c.env.DB, userId);
+  return c.json({ user: serializeAdminUser(nextUser, nextProfile ?? undefined) });
+}
+
+async function revokeAdminUserSessions(c: Context<AppEnv>): Promise<Response> {
+  const body = await readJson<Record<string, unknown>>(c);
+  const confirmationError = requireAdminConfirmation(
+    c,
+    body,
+    ADMIN_SESSION_REVOKE_CONFIRMATION,
+  );
+  if (confirmationError) return confirmationError;
+  const userId = c.req.param('id') ?? '';
+  const user = await findUserById(c.env.DB, userId);
+  if (!user) return adminUserNotFound(c);
+  await revokeUserAuthSessions(c.env.DB, userId, Date.now());
+  return c.body(null, 204);
+}
+
+async function deleteAdminUserAccount(c: Context<AppEnv>): Promise<Response> {
+  const body = await readJson<Record<string, unknown>>(c);
+  const confirmationError = requireAdminConfirmation(
+    c,
+    body,
+    ADMIN_USER_DELETE_CONFIRMATION,
+  );
+  if (confirmationError) return confirmationError;
+  const userId = c.req.param('id') ?? '';
+  const user = await findUserById(c.env.DB, userId);
+  if (!user) return adminUserNotFound(c);
+  const deleted = await deleteAdminUserQuery(
+    c.env.DB,
+    userId,
+    Date.now() + TEXTURE_CLEANUP_DELAY_MS,
+  );
+  if (!deleted) return adminMutationConflict(c, userId, c.get('user').id);
+  return c.body(null, 204);
+}
+
+routes.patch('/admin/users/:id/status', authMiddleware, adminMiddleware, updateAdminUserStatus);
+routes.put('/admin/users/:id/status', authMiddleware, adminMiddleware, updateAdminUserStatus);
+routes.delete('/admin/users/:id/sessions', authMiddleware, adminMiddleware, revokeAdminUserSessions);
+routes.post('/admin/users/:id/sessions/revoke', authMiddleware, adminMiddleware, revokeAdminUserSessions);
+routes.delete('/admin/users/:id', authMiddleware, adminMiddleware, deleteAdminUserAccount);
 
 async function adminSettings(c: Context<AppEnv>): Promise<Response> {
   const record = await findSiteSettings(c.env.DB);

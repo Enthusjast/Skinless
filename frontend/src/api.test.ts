@@ -8,14 +8,17 @@ import {
   getAdminInvites,
   getAdminSettings,
   login,
+  deleteAdminUser,
   resendEmailChange,
   resendPasswordReset,
   refreshSession,
   register,
   revokeAdminInvite,
+  revokeAdminUserSessions,
   setCsrfToken,
   startEmailChange,
   startPasswordReset,
+  updateAdminUserStatus,
   updateAdminSettings,
   verifyPasswordReset,
 } from './api';
@@ -315,6 +318,43 @@ describe('admin registration settings and invite requests', () => {
       maxProfilesPerUser: 4,
       maxTexturesPerUser: 40,
       enforceJoinIp: true,
+    });
+  });
+});
+
+describe('admin account control requests', () => {
+  it('sends status, session-revocation, and deletion confirmations through management requests', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ user: { id: 'user-1', status: 'disabled' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    setCsrfToken('csrf-token');
+
+    await updateAdminUserStatus('user-1', 'disabled', 'DISABLE');
+    await revokeAdminUserSessions('user-1', 'REVOKE');
+    await deleteAdminUser('user-1', 'DELETE');
+
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/admin/users/user-1/status',
+      '/api/admin/users/user-1/sessions',
+      '/api/admin/users/user-1',
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      status: 'disabled',
+      confirmation: 'DISABLE',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      confirmation: 'REVOKE',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      confirmation: 'DELETE',
     });
   });
 });
